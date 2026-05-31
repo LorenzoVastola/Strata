@@ -8,3 +8,33 @@ body,
   height: 100%;
   overflow: hidden;
 }
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #ffffff22;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #ffffff44;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.tabbar-scroll {
+  scrollbar-width: none;
+}
+
+.tabbar-scroll::-webkit-scrollbar {
+  display: none;
+}

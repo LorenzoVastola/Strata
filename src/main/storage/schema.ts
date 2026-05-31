@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 3
 
 export const migrations: Record<number, string> = {
   1: `
@@ -34,5 +34,18 @@ export const migrations: Record<number, string> = {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+  `,
+  2: `
+    CREATE TABLE IF NOT EXISTS editor_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      open_tabs TEXT NOT NULL DEFAULT '[]',
+      active_tab TEXT
+    );
+    INSERT OR IGNORE INTO editor_state (id, open_tabs, active_tab) VALUES (1, '[]', NULL);
+    UPDATE schema_meta SET version = 2;
+  `,
+  3: `
+    ALTER TABLE db_connections ADD COLUMN encrypted_password TEXT;
+    UPDATE schema_meta SET version = 3;
   `
 }
