@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld('api', {
   database: {
     listConnections: () => ipcRenderer.invoke('db:listConnections'),
     saveConnection: (connection: DbConnectionInput) => ipcRenderer.invoke('db:saveConnection', connection),
+    updateConnection: (connectionId: number, connection: DbConnectionInput) =>
+      ipcRenderer.invoke('db:updateConnection', connectionId, connection),
     testConnection: (connection: DbConnectionInput) => ipcRenderer.invoke('db:testConnection', connection),
     connect: (connectionId: number) => ipcRenderer.invoke('db:connect', connectionId),
     getSchema: (connectionId: number) => ipcRenderer.invoke('db:getSchema', connectionId),
@@ -61,6 +63,33 @@ contextBridge.exposeInMainWorld('api', {
       pageSize: number,
     ) => ipcRenderer.invoke('db:browseTable', connectionId, databaseName, tableName, page, pageSize),
     disconnect: (connectionId: number) => ipcRenderer.invoke('db:disconnect', connectionId),
+    deleteConnection: (connectionId: number) => ipcRenderer.invoke('db:deleteConnection', connectionId),
+  },
+
+  // HTTP
+  http: {
+    list: () => ipcRenderer.invoke('http:list'),
+    createCollection: (name: string) => ipcRenderer.invoke('http:createCollection', name),
+    renameCollection: (id: number, name: string) => ipcRenderer.invoke('http:renameCollection', id, name),
+    deleteCollection: (id: number) => ipcRenderer.invoke('http:deleteCollection', id),
+    duplicateCollection: (id: number) => ipcRenderer.invoke('http:duplicateCollection', id),
+    createFolder: (collectionId: number, name: string, parentId?: number | null) => ipcRenderer.invoke('http:createFolder', collectionId, name, parentId),
+    renameFolder: (id: number, name: string) => ipcRenderer.invoke('http:renameFolder', id, name),
+    deleteFolder: (id: number) => ipcRenderer.invoke('http:deleteFolder', id),
+    duplicateFolder: (id: number) => ipcRenderer.invoke('http:duplicateFolder', id),
+    saveRequest: (request: HttpRequest) => ipcRenderer.invoke('http:saveRequest', request),
+    deleteRequest: (id: number) => ipcRenderer.invoke('http:deleteRequest', id),
+    moveRequest: (id: number, collectionId: number, folderId?: number | null) => ipcRenderer.invoke('http:moveRequest', id, collectionId, folderId),
+    duplicateRequest: (id: number) => ipcRenderer.invoke('http:duplicateRequest', id),
+    setActiveRequest: (id: number | null) => ipcRenderer.invoke('http:setActiveRequest', id),
+    getLayout: () => ipcRenderer.invoke('http:getLayout'),
+    saveLayout: (layout: { sidebarWidth: number; requestPanePercent: number }) => ipcRenderer.invoke('http:saveLayout', layout),
+    listEnvironments: () => ipcRenderer.invoke('http:listEnvironments'),
+    saveEnvironment: (environment: HttpEnvironment) => ipcRenderer.invoke('http:saveEnvironment', environment),
+    deleteEnvironment: (id: number) => ipcRenderer.invoke('http:deleteEnvironment', id),
+    history: () => ipcRenderer.invoke('http:history'),
+    deleteHistory: (id: number) => ipcRenderer.invoke('http:deleteHistory', id),
+    send: (request: HttpRequest) => ipcRenderer.invoke('http:send', request),
   },
 })
 
@@ -76,12 +105,18 @@ declare global {
     password: string
     database: string
   }
-  type DbConnection = Omit<DbConnectionInput, 'password'> & { id: number }
+  type DbConnection = Omit<DbConnectionInput, 'password'> & {
+    id: number
+    status?: 'connected' | 'disconnected' | 'error'
+    statusError?: string
+  }
   type DbColumn = {
     name: string
     type: string
     columnKey?: string
     nullable?: string
+    defaultValue?: string | null
+    extra?: string
   }
   type DbIndex = {
     name: string
@@ -113,6 +148,52 @@ declare global {
     total?: number
     page?: number
     pageSize?: number
+  }
+  type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  type HttpKeyValue = { id?: string; key: string; value: string; enabled: boolean; description?: string }
+  type HttpBody = {
+    type: 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded'
+    rawType?: 'json' | 'xml' | 'text'
+    raw?: string
+    fields?: HttpKeyValue[]
+  }
+  type HttpAuth =
+    | { type: 'none' }
+    | { type: 'bearer'; token: string }
+    | { type: 'basic'; username: string; password: string }
+    | { type: 'apiKey'; key: string; value: string; addTo: 'header' | 'query' }
+  type HttpScripts = { preRequest?: string; postResponse?: string }
+  type HttpResponseCapture = { id?: string; jsonPath: string; variable: string; enabled: boolean }
+  type HttpCollection = { id: number; name: string }
+  type HttpFolder = { id: number; collectionId: number; name: string; parentId?: number | null; updatedAt?: string }
+  type HttpRequest = {
+    id?: number
+    collectionId: number
+    folderId?: number | null
+    name: string
+    method: HttpMethod
+    url: string
+    params: HttpKeyValue[]
+    headers: HttpKeyValue[]
+    body: HttpBody
+    auth: HttpAuth
+    timeoutMs: number
+    environmentId?: number | null
+    updatedAt?: string
+    description?: string
+    scripts?: HttpScripts
+    responseCaptures?: HttpResponseCapture[]
+  }
+  type HttpEnvironment = { id?: number; name: string; variables: HttpKeyValue[]; updatedAt?: string }
+  type HttpResponse = {
+    status: number
+    statusText: string
+    duration: number
+    size: number
+    body: string
+    headers: Record<string, string>
+    timeline: { dns: number; tcp: number; ttfb: number; download: number }
+    url: string
   }
 
   interface Window {
@@ -162,6 +243,7 @@ declare global {
       database: {
         listConnections: () => Promise<DbConnection[]>
         saveConnection: (connection: DbConnectionInput) => Promise<number>
+        updateConnection: (connectionId: number, connection: DbConnectionInput) => Promise<boolean>
         testConnection: (connection: DbConnectionInput) => Promise<{ success: boolean; error?: string }>
         connect: (connectionId: number) => Promise<boolean>
         getSchema: (connectionId: number) => Promise<DbSchemaNode[]>
@@ -174,6 +256,31 @@ declare global {
           pageSize: number,
         ) => Promise<DbQueryResult>
         disconnect: (connectionId: number) => Promise<boolean>
+        deleteConnection: (connectionId: number) => Promise<boolean>
+      }
+      http: {
+        list: () => Promise<{ collections: HttpCollection[]; folders: HttpFolder[]; requests: HttpRequest[]; activeRequestId: number | null }>
+        createCollection: (name: string) => Promise<number>
+        renameCollection: (id: number, name: string) => Promise<boolean>
+        deleteCollection: (id: number) => Promise<boolean>
+        duplicateCollection: (id: number) => Promise<number>
+        createFolder: (collectionId: number, name: string, parentId?: number | null) => Promise<number>
+        renameFolder: (id: number, name: string) => Promise<boolean>
+        deleteFolder: (id: number) => Promise<boolean>
+        duplicateFolder: (id: number) => Promise<number>
+        saveRequest: (request: HttpRequest) => Promise<number>
+        deleteRequest: (id: number) => Promise<boolean>
+        moveRequest: (id: number, collectionId: number, folderId?: number | null) => Promise<boolean>
+        duplicateRequest: (id: number) => Promise<number>
+        setActiveRequest: (id: number | null) => Promise<boolean>
+        getLayout: () => Promise<{ sidebarWidth: number; requestPanePercent: number }>
+        saveLayout: (layout: { sidebarWidth: number; requestPanePercent: number }) => Promise<boolean>
+        listEnvironments: () => Promise<HttpEnvironment[]>
+        saveEnvironment: (environment: HttpEnvironment) => Promise<number>
+        deleteEnvironment: (id: number) => Promise<boolean>
+        history: () => Promise<{ id: number; request: Record<string, unknown>; response: Record<string, unknown>; executedAt: string }[]>
+        deleteHistory: (id: number) => Promise<boolean>
+        send: (request: HttpRequest) => Promise<HttpResponse>
       }
     }
   }

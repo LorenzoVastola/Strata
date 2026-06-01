@@ -44,5 +44,17 @@
     "vite-plugin-electron": "^0.28.6",
     "vite-plugin-electron-renderer": "^0.14.5"
   },
-  "main": "dist-electron/index.js"
+  "main": "dist-electron/index.js",
+  "build": {
+    "icon": "build/icons/png/512x512.png",
+    "win": {
+      "icon": "build/icons/win/icon.ico"
+    },
+    "mac": {
+      "icon": "build/icons/mac/icon.icns"
+    },
+    "linux": {
+      "icon": "build/icons/png"
+    }
+  }
 }
