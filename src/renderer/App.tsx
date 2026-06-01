@@ -1,4 +1,4 @@
-import { Code2, Database, GitBranch, Globe } from "lucide-react";
+import { Code2, Database, GitBranch, Globe, SquareTerminal } from "lucide-react";
 import { useState, type ComponentType } from "react";
 import Home from "./components/Home";
 import type { Workspace } from "./types/index";
@@ -6,10 +6,12 @@ import * as DBPanelModule from "./panels/DBPanel";
 import * as GitPanelModule from "./panels/GitPanel";
 import * as HttpPanelModule from "./panels/HttpPanel";
 import * as IDEPanelModule from "./panels/IDEPanel";
+import * as TerminalPanelModule from "./panels/TerminalPanel";
 
-type ActivePanel = "ide" | "git" | "db" | "http";
+type ActivePanel = "ide" | "git" | "db" | "http" | "terminal";
 
 type IDEPanelProps = { workspacePath: string };
+type TerminalPanelProps = { workspacePath?: string };
 
 const IDEPanel =
   (IDEPanelModule as { default?: ComponentType<IDEPanelProps> }).default ??
@@ -23,10 +25,14 @@ const DBPanel =
 const HttpPanel =
   (HttpPanelModule as { default?: ComponentType }).default ??
   (() => <div className="p-4 text-zinc-300">HTTP Panel</div>);
+const TerminalPanel =
+  (TerminalPanelModule as { default?: ComponentType<TerminalPanelProps> }).default ??
+  (() => <div className="p-4 text-zinc-300">Terminal Panel</div>);
 
 export default function App() {
   const [activePanel, setActivePanel] = useState<ActivePanel>("ide");
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+  const hasWorkspace = Boolean(workspacePath);
   const _workspaceTypeCheck: Workspace[] = [];
   void _workspaceTypeCheck;
 
@@ -35,13 +41,20 @@ export default function App() {
     setActivePanel("ide");
   };
 
+  const selectPanel = (panel: ActivePanel) => {
+    if (!hasWorkspace && (panel === "ide" || panel === "git")) return;
+    setActivePanel(panel);
+  };
+
   return (
     <div className="flex flex-row h-screen w-screen overflow-hidden">
       <aside className="flex h-screen w-12 shrink-0 flex-col items-center gap-2 bg-zinc-900 py-3">
         <button
           type="button"
-          onClick={() => setActivePanel("ide")}
-          className={`rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white ${
+          onClick={() => selectPanel("ide")}
+          disabled={!hasWorkspace}
+          title={hasWorkspace ? "Editor" : "Apri un progetto per usare l'editor"}
+          className={`rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700 disabled:hover:bg-transparent disabled:hover:text-zinc-700 ${
             activePanel === "ide" ? "bg-zinc-800 text-white" : ""
           }`}
           aria-label="Open IDE panel"
@@ -50,8 +63,10 @@ export default function App() {
         </button>
         <button
           type="button"
-          onClick={() => setActivePanel("git")}
-          className={`rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white ${
+          onClick={() => selectPanel("git")}
+          disabled={!hasWorkspace}
+          title={hasWorkspace ? "Git" : "Apri un progetto per usare Git"}
+          className={`rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white disabled:cursor-not-allowed disabled:text-zinc-700 disabled:hover:bg-transparent disabled:hover:text-zinc-700 ${
             activePanel === "git" ? "bg-zinc-800 text-white" : ""
           }`}
           aria-label="Open Git panel"
@@ -60,7 +75,8 @@ export default function App() {
         </button>
         <button
           type="button"
-          onClick={() => setActivePanel("db")}
+          onClick={() => selectPanel("db")}
+          title="Database"
           className={`rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white ${
             activePanel === "db" ? "bg-zinc-800 text-white" : ""
           }`}
@@ -70,7 +86,8 @@ export default function App() {
         </button>
         <button
           type="button"
-          onClick={() => setActivePanel("http")}
+          onClick={() => selectPanel("http")}
+          title="HTTP"
           className={`rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white ${
             activePanel === "http" ? "bg-zinc-800 text-white" : ""
           }`}
@@ -78,17 +95,29 @@ export default function App() {
         >
           <Globe className="h-5 w-5" />
         </button>
+        <button
+          type="button"
+          onClick={() => selectPanel("terminal")}
+          title="Terminale"
+          className={`rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white ${
+            activePanel === "terminal" ? "bg-zinc-800 text-white" : ""
+          }`}
+          aria-label="Open Terminal panel"
+        >
+          <SquareTerminal className="h-5 w-5" />
+        </button>
       </aside>
 
       <main className="h-screen min-w-0 flex-1 bg-zinc-950">
-        {!workspacePath ? (
-          <Home onOpenWorkspace={handleOpenWorkspace} onOpenDbConnection={() => {}} />
+        {!workspacePath && (activePanel === "ide" || activePanel === "git") ? (
+          <Home onOpenWorkspace={handleOpenWorkspace} onOpenDbConnection={() => setActivePanel("db")} />
         ) : (
           <>
-            {activePanel === "ide" && <IDEPanel workspacePath={workspacePath} />}
-            {activePanel === "git" && <GitPanel />}
+            {activePanel === "ide" && workspacePath && <IDEPanel workspacePath={workspacePath} />}
+            {activePanel === "git" && workspacePath && <GitPanel />}
             {activePanel === "db" && <DBPanel />}
             {activePanel === "http" && <HttpPanel />}
+            {activePanel === "terminal" && <TerminalPanel workspacePath={workspacePath ?? undefined} />}
           </>
         )}
       </main>

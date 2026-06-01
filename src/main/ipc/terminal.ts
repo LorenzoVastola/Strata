@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import fs from 'fs'
 import pty, { type IPty } from 'node-pty'
 import path from 'path'
@@ -86,7 +86,7 @@ export function registerTerminalIpc(mainWindow: BrowserWindow): void {
       shells.find((option) => option.id === shellId) ??
       shells.find((option) => option.id === getPreferredShell()) ??
       shells[0]
-    const resolvedCwd = cwd && fs.existsSync(cwd) ? cwd : process.cwd()
+    const resolvedCwd = cwd && fs.existsSync(cwd) ? cwd : app.getPath('home')
     const terminal = pty.spawn(shell.command, shell.args, {
       name: 'xterm-256color',
       cols: 80,

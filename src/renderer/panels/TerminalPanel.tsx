@@ -27,7 +27,7 @@ type TerminalInstance = {
 }
 
 type TerminalPanelProps = {
-  workspacePath: string
+  workspacePath?: string
 }
 
 const terminalTheme = {

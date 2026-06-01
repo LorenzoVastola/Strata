@@ -6,17 +6,27 @@ import { registerWorkspaceIpc } from './ipc/workspace'
 import { registerEditorIpc } from './ipc/editor'
 import { registerTerminalIpc } from './ipc/terminal'
 import { registerDatabaseIpc } from './ipc/database'
+import { registerHttpIpc } from './ipc/http'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 function createWindow(): BrowserWindow {
+  const iconPath = app.isPackaged
+    ? process.platform === 'darwin'
+      ? path.join(process.resourcesPath, 'icons/mac/icon.icns')
+      : path.join(process.resourcesPath, 'icons/win/icon.ico')
+    : process.platform === 'darwin'
+      ? path.join(__dirname, '../build/icons/mac/icon.icns')
+      : path.join(__dirname, '../build/icons/win/icon.ico')
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#09090b',
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'index.mjs'),
       contextIsolation: true,
@@ -46,6 +56,7 @@ app.whenReady().then(() => {
   registerWorkspaceIpc()
   registerEditorIpc()
   registerDatabaseIpc()
+  registerHttpIpc()
   const win = createWindow()
   registerTerminalIpc(win)
 })
