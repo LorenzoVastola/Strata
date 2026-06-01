@@ -1,6 +1,6 @@
-import Editor, { type BeforeMount, type Monaco, type OnMount } from '@monaco-editor/react'
+import Editor, { DiffEditor, type BeforeMount, type Monaco, type OnMount } from '@monaco-editor/react'
 import { FilePlus, FolderOpen, FolderPlus, Search, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import FileExplorer from '../components/FileExplorer'
 import TabBar, { type EditorTab } from '../components/TabBar'
 import TerminalPanel from './TerminalPanel'
@@ -8,6 +8,19 @@ import { getFileIconMeta } from '../utils/fileIcons'
 
 type IDEPanelProps = {
   workspacePath: string
+  /** When true, hides the file-explorer sidebar (used when git sidebar is shown externally) */
+  hideSidebar?: boolean
+}
+
+export type IDEPanelHandle = {
+  openDiffTab: (params: {
+    path: string
+    title: string
+    language: string
+    original: string
+    modified: string
+    filePath?: string
+  }) => void
 }
 
 type SearchResult = {
@@ -121,7 +134,10 @@ const getModelLanguage = (fileName: string) => {
   return map[ext ?? ''] ?? 'plaintext'
 }
 
-export default function IDEPanel({ workspacePath: initialWorkspacePath }: IDEPanelProps) {
+const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
+  { workspacePath: initialWorkspacePath, hideSidebar = false },
+  ref,
+) {
   const [tabs, setTabs] = useState<EditorTab[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
   const [panels, setPanels] = useState<EditorPanelState[]>([
@@ -689,6 +705,31 @@ export default function IDEPanel({ workspacePath: initialWorkspacePath }: IDEPan
     setActivePanelId('panel-1')
   }, [tabs])
 
+  // ── Expose openDiffTab to parent via ref ────────────────────────────────────
+  const openDiffTab = useCallback((params: {
+    path: string; title: string; language: string
+    original: string; modified: string; filePath?: string
+  }) => {
+    const { path, title, language, original, modified, filePath } = params
+    if (tabs.find(t => t.path === path)) {
+      setPanels(prev => prev.map(p => p.id === activePanelId ? { ...p, activePath: path } : p))
+      setActivePath(path)
+      return
+    }
+    const newTab: EditorTab = {
+      path, name: title, content: '', savedContent: '', language,
+      diff: { original, modified },
+      iconPath: filePath,
+    }
+    setTabs(prev => [...prev, newTab])
+    setPanels(prev => prev.map(p =>
+      p.id === activePanelId ? { ...p, tabPaths: [...p.tabPaths, path], activePath: path } : p
+    ))
+    setActivePath(path)
+  }, [tabs, activePanelId])
+
+  useImperativeHandle(ref, () => ({ openDiffTab }), [openDiffTab])
+
   const changeActiveLanguage = useCallback(() => {
     if (!activeTab || !monacoRef.current) return
 
@@ -965,63 +1006,67 @@ export default function IDEPanel({ workspacePath: initialWorkspacePath }: IDEPan
             style={{ left: sidebarPreviewWidth }}
           />
         )}
-        <aside
-          className="flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-900"
-          style={{ width: sidebarWidth }}
-        >
-          <div className="flex shrink-0 items-center gap-0.5 border-b border-zinc-800 px-2 py-1.5">
+        {!hideSidebar && (
+          <>
+            <aside
+              className="flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-900"
+              style={{ width: sidebarWidth }}
+            >
+              <div className="flex shrink-0 items-center gap-0.5 border-b border-zinc-800 px-2 py-1.5">
+                <button
+                  type="button"
+                  onClick={openFolder}
+                  disabled={openingFolder}
+                  title="Apri cartella"
+                  className="rounded p-1 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100 disabled:opacity-50"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  title="Nuovo file"
+                  onClick={() => setCreateCommand({ id: Date.now(), type: 'file' })}
+                  className="rounded p-1 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100"
+                >
+                  <FilePlus className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  title="Nuova cartella"
+                  onClick={() => setCreateCommand({ id: Date.now(), type: 'folder' })}
+                  className="rounded p-1 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSearchOpen(true)}
+                  title="Cerca in tutti i file"
+                  className="rounded p-1 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100"
+                >
+                  <Search className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                <FileExplorer
+                  workspacePath={workspacePath}
+                  onFileSelect={openFile}
+                  revealPath={revealPath}
+                  createCommand={createCommand}
+                />
+              </div>
+            </aside>
             <button
               type="button"
-              onClick={openFolder}
-              disabled={openingFolder}
-              title="Apri cartella"
-              className="rounded p-1 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100 disabled:opacity-50"
-            >
-              <FolderOpen className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              title="Nuovo file"
-              onClick={() => setCreateCommand({ id: Date.now(), type: 'file' })}
-              className="rounded p-1 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100"
-            >
-              <FilePlus className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              title="Nuova cartella"
-              onClick={() => setCreateCommand({ id: Date.now(), type: 'folder' })}
-              className="rounded p-1 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100"
-            >
-              <FolderPlus className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsSearchOpen(true)}
-              title="Cerca in tutti i file"
-              className="rounded p-1 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100"
-            >
-              <Search className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="min-h-0 flex-1">
-            <FileExplorer
-              workspacePath={workspacePath}
-              onFileSelect={openFile}
-              revealPath={revealPath}
-              createCommand={createCommand}
+              aria-label="Ridimensiona sidebar"
+              onDoubleClick={toggleSidebarWidth}
+              onMouseDown={(event) => resizeSidebar(event.clientX)}
+              className={`w-1 shrink-0 cursor-col-resize ${
+                sidebarPreviewWidth !== null ? 'bg-sky-500' : 'bg-zinc-800 hover:bg-sky-600'
+              }`}
             />
-          </div>
-        </aside>
-        <button
-          type="button"
-          aria-label="Ridimensiona sidebar"
-          onDoubleClick={toggleSidebarWidth}
-          onMouseDown={(event) => resizeSidebar(event.clientX)}
-          className={`w-1 shrink-0 cursor-col-resize ${
-            sidebarPreviewWidth !== null ? 'bg-sky-500' : 'bg-zinc-800 hover:bg-sky-600'
-          }`}
-        />
+          </>
+        )}
 
         <div ref={editorStackRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {terminalPreviewHeight !== null && (
@@ -1052,7 +1097,7 @@ export default function IDEPanel({ workspacePath: initialWorkspacePath }: IDEPan
                       onDragEnd={handleTabDragEnd}
                       onDropTab={moveDraggedTab}
                     />
-                    {panelActiveTab && panel.id === activePanelId && (
+                    {panelActiveTab && panel.id === activePanelId && !panelActiveTab.diff && (
                       <div className="flex h-7 shrink-0 items-center gap-1 overflow-hidden border-b border-zinc-800 bg-zinc-900/60 px-3 text-xs text-zinc-500">
                         {breadcrumbSegments.map((segment, index) => (
                           <span key={segment.fullPath} className="flex min-w-0 items-center gap-1">
@@ -1079,6 +1124,23 @@ export default function IDEPanel({ workspacePath: initialWorkspacePath }: IDEPan
                       <div className="flex h-full items-center justify-center text-sm text-zinc-500">
                         Caricamento file...
                       </div>
+                    ) : panelActiveTab?.diff ? (
+                      <DiffEditor
+                        height="100%"
+                        width="100%"
+                        language={panelActiveTab.language}
+                        original={panelActiveTab.diff.original}
+                        modified={panelActiveTab.diff.modified}
+                        theme={theme}
+                        beforeMount={handleBeforeMount}
+                        options={{
+                          readOnly: true,
+                          renderSideBySide: true,
+                          minimap: { enabled: false },
+                          fontSize: 14,
+                          wordWrap: 'on',
+                        }}
+                      />
                     ) : panelActiveTab ? (
                       <Editor
                         height="100%"
@@ -1361,4 +1423,6 @@ export default function IDEPanel({ workspacePath: initialWorkspacePath }: IDEPan
       )}
     </div>
   )
-}
+})
+
+export default IDEPanel

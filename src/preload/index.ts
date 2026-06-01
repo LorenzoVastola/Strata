@@ -91,10 +91,55 @@ contextBridge.exposeInMainWorld('api', {
     deleteHistory: (id: number) => ipcRenderer.invoke('http:deleteHistory', id),
     send: (request: HttpRequest) => ipcRenderer.invoke('http:send', request),
   },
+
+  // Git
+  git: {
+    status: (workspacePath: string) => ipcRenderer.invoke('git:status', workspacePath),
+    stage: (workspacePath: string, filePath: string) => ipcRenderer.invoke('git:stage', workspacePath, filePath),
+    unstage: (workspacePath: string, filePath: string) => ipcRenderer.invoke('git:unstage', workspacePath, filePath),
+    stageAll: (workspacePath: string) => ipcRenderer.invoke('git:stageAll', workspacePath),
+    discardFile: (workspacePath: string, filePath: string, isUntracked: boolean) =>
+      ipcRenderer.invoke('git:discardFile', workspacePath, filePath, isUntracked),
+    discardAll: (workspacePath: string) => ipcRenderer.invoke('git:discardAll', workspacePath),
+    commit: (workspacePath: string, message: string) => ipcRenderer.invoke('git:commit', workspacePath, message),
+    getBranch: (workspacePath: string) => ipcRenderer.invoke('git:getBranch', workspacePath),
+    getBranches: (workspacePath: string) => ipcRenderer.invoke('git:getBranches', workspacePath),
+    checkoutBranch: (workspacePath: string, branch: string) => ipcRenderer.invoke('git:checkoutBranch', workspacePath, branch),
+    createBranch: (workspacePath: string, branch: string) => ipcRenderer.invoke('git:createBranch', workspacePath, branch),
+    pull: (workspacePath: string) => ipcRenderer.invoke('git:pull', workspacePath),
+    push: (workspacePath: string) => ipcRenderer.invoke('git:push', workspacePath),
+    getLog: (workspacePath: string) => ipcRenderer.invoke('git:getLog', workspacePath),
+    getCommitFiles: (workspacePath: string, hash: string) => ipcRenderer.invoke('git:getCommitFiles', workspacePath, hash),
+    getCommitFileDiff: (workspacePath: string, hash: string, filePath: string) =>
+      ipcRenderer.invoke('git:getCommitFileDiff', workspacePath, hash, filePath),
+    getDiff: (workspacePath: string, filePath: string, isStaged: boolean) =>
+      ipcRenderer.invoke('git:getDiff', workspacePath, filePath, isStaged),
+  },
 })
 
 // Tipi globali per TypeScript nel renderer
 declare global {
+  type GitFileItem = { path: string; status: string }
+  type GitStatusResult = {
+    staged: GitFileItem[]
+    unstaged: GitFileItem[]
+    ahead: number
+    behind: number
+    current: string
+    tracking: string | null
+  }
+  type GitCommit = {
+    hash: string
+    shortHash: string
+    message: string
+    author: string
+    date: string
+    refs: string
+  }
+  type GitBranchItem = { name: string; current: boolean; remote: boolean }
+  type GitDiff = { original: string; modified: string }
+  type GitCommitFile = { status: string; path: string; oldPath?: string }
+
   type DbDriver = 'mysql' | 'postgres'
   type DbConnectionInput = {
     driver: DbDriver
@@ -257,6 +302,25 @@ declare global {
         ) => Promise<DbQueryResult>
         disconnect: (connectionId: number) => Promise<boolean>
         deleteConnection: (connectionId: number) => Promise<boolean>
+      }
+      git: {
+        status: (workspacePath: string) => Promise<GitStatusResult>
+        stage: (workspacePath: string, filePath: string) => Promise<boolean>
+        unstage: (workspacePath: string, filePath: string) => Promise<boolean>
+        stageAll: (workspacePath: string) => Promise<boolean>
+        discardFile: (workspacePath: string, filePath: string, isUntracked: boolean) => Promise<boolean>
+        discardAll: (workspacePath: string) => Promise<boolean>
+        commit: (workspacePath: string, message: string) => Promise<boolean>
+        getBranch: (workspacePath: string) => Promise<string>
+        getBranches: (workspacePath: string) => Promise<GitBranchItem[]>
+        checkoutBranch: (workspacePath: string, branch: string) => Promise<boolean>
+        createBranch: (workspacePath: string, branch: string) => Promise<boolean>
+        pull: (workspacePath: string) => Promise<boolean>
+        push: (workspacePath: string) => Promise<boolean>
+        getLog: (workspacePath: string) => Promise<GitCommit[]>
+        getCommitFiles: (workspacePath: string, hash: string) => Promise<GitCommitFile[]>
+        getCommitFileDiff: (workspacePath: string, hash: string, filePath: string) => Promise<GitDiff>
+        getDiff: (workspacePath: string, filePath: string, isStaged: boolean) => Promise<GitDiff>
       }
       http: {
         list: () => Promise<{ collections: HttpCollection[]; folders: HttpFolder[]; requests: HttpRequest[]; activeRequestId: number | null }>

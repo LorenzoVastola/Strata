@@ -7,6 +7,10 @@ export type EditorTab = {
   content: string
   savedContent: string
   language: string
+  /** If present, the tab shows a Monaco DiffEditor (read-only) */
+  diff?: { original: string; modified: string }
+  /** Real file path used for icon lookup on diff tabs */
+  iconPath?: string
 }
 
 type TabBarProps = {
@@ -42,7 +46,7 @@ export default function TabBar({
       {tabs.map((tab) => {
         const isActive = tab.path === activePath
         const isModified = tab.content !== tab.savedContent
-        const { Icon, colorClass } = getFileIconMeta(tab.name, tab.language)
+        const { Icon, colorClass } = getFileIconMeta(tab.iconPath ?? tab.name, tab.language)
 
         return (
           <div
@@ -73,7 +77,9 @@ export default function TabBar({
                 : 'bg-transparent text-zinc-500 hover:bg-zinc-900/60 hover:text-zinc-300'
             }`}
           >
-            <Icon className={`h-3.5 w-3.5 shrink-0 ${colorClass}`} />
+            {tab.diff
+              ? <span className="text-[10px] font-bold text-amber-400 shrink-0 w-3.5 text-center">M</span>
+              : <Icon className={`h-3.5 w-3.5 shrink-0 ${colorClass}`} />}
             <button
               type="button"
               onClick={() => onSelect(tab.path)}
