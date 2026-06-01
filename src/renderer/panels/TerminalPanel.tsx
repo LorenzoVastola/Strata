@@ -30,9 +30,7 @@ type TerminalPanelProps = {
   workspacePath?: string
 }
 
-const terminalTheme = {
-  background: '#1e1e1e',
-  foreground: '#cccccc',
+const BASE_TERMINAL_COLORS = {
   cursor: '#ffffff',
   black: '#000000',
   red: '#cd3131',
@@ -50,6 +48,13 @@ const terminalTheme = {
   brightMagenta: '#d670d6',
   brightCyan: '#29b8db',
   brightWhite: '#e5e5e5',
+}
+
+function getTerminalTheme() {
+  const style = getComputedStyle(document.documentElement)
+  const bg = style.getPropertyValue('--strata-bg').trim() || '#1e1e1e'
+  const fg = style.getPropertyValue('--strata-text').trim() || '#cccccc'
+  return { ...BASE_TERMINAL_COLORS, background: bg, foreground: fg, selectionBackground: '#ffffff30' }
 }
 
 export default function TerminalPanel({ workspacePath }: TerminalPanelProps) {
@@ -89,7 +94,7 @@ export default function TerminalPanel({ workspacePath }: TerminalPanelProps) {
         const terminal = new Terminal({
           fontFamily: 'Cascadia Code, Fira Code, Consolas, monospace',
           fontSize: 13,
-          theme: terminalTheme,
+          theme: getTerminalTheme(),
           cursorBlink: true,
           cursorStyle: 'block',
           scrollback: 5000,
@@ -288,9 +293,21 @@ export default function TerminalPanel({ workspacePath }: TerminalPanelProps) {
     }
   }, [])
 
+  // Update all xterm instances when the Strata theme changes
+  useEffect(() => {
+    const handler = () => {
+      const newTheme = getTerminalTheme()
+      for (const instance of Object.values(instancesRef.current)) {
+        instance.terminal.options.theme = newTheme
+      }
+    }
+    window.addEventListener('strata:theme-change', handler)
+    return () => window.removeEventListener('strata:theme-change', handler)
+  }, [])
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#1e1e1e] text-zinc-200">
-      <div className="flex h-[35px] shrink-0 items-center border-b border-zinc-800 bg-[#1e1e1e]">
+    <div className="flex h-full min-h-0 flex-col bg-[#1e1e1e] text-zinc-200" style={{ background: 'var(--strata-bg)', color: 'var(--strata-text)' }}>
+      <div className="flex h-[35px] shrink-0 items-center border-b border-zinc-800 bg-[#1e1e1e]" style={{ background: 'var(--strata-sidebar)', borderColor: 'var(--strata-border)' }}>
         <div className="flex h-full shrink-0 items-center border-r border-zinc-800 px-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
           Terminali
         </div>
@@ -304,6 +321,7 @@ export default function TerminalPanel({ workspacePath }: TerminalPanelProps) {
                 className={`flex h-[35px] min-w-[130px] items-center gap-2 border-r border-zinc-800 px-3 text-xs ${
                   isActive ? 'bg-[#2d2d2d] text-[#cccccc]' : 'text-zinc-500'
                 }`}
+                style={isActive ? { background: 'var(--strata-tab-active)', color: 'var(--strata-text)', borderColor: 'var(--strata-border)' } : { borderColor: 'var(--strata-border)' }}
               >
                 <button
                   type="button"
@@ -333,6 +351,7 @@ export default function TerminalPanel({ workspacePath }: TerminalPanelProps) {
             value={selectedShellId ?? preferredShell ?? shells[0]?.id ?? ''}
             onChange={(event) => setSelectedShellId(event.target.value)}
             className="h-6 max-w-32 rounded border border-zinc-700 bg-[#252526] px-1 text-[11px] text-[#cccccc] outline-none"
+            style={{ background: 'var(--strata-sidebar)', color: 'var(--strata-text)', borderColor: 'var(--strata-border)' }}
           >
             {shells.map((shell) => (
               <option key={shell.id} value={shell.id}>
@@ -345,6 +364,7 @@ export default function TerminalPanel({ workspacePath }: TerminalPanelProps) {
             title="Nuovo terminale"
             onClick={() => void createTerminal(selectedShellId ?? preferredShell ?? undefined, activePane)}
             className="h-6 rounded bg-[#2d2d2d] px-2 text-[11px] text-[#cccccc] hover:bg-zinc-700"
+            style={{ background: 'var(--strata-tab-active)', color: 'var(--strata-text)' }}
           >
             + Nuovo
           </button>
@@ -384,6 +404,7 @@ export default function TerminalPanel({ workspacePath }: TerminalPanelProps) {
           onClick={splitTerminal}
           disabled={isSplit}
           className="mr-2 flex h-6 items-center gap-1 rounded bg-[#2d2d2d] px-2 text-[11px] text-[#cccccc] hover:bg-zinc-700 disabled:opacity-40"
+          style={{ background: 'var(--strata-tab-active)', color: 'var(--strata-text)' }}
         >
           <Columns2 className="h-4 w-4" />
           Split

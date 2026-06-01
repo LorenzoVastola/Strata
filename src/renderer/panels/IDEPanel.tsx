@@ -5,6 +5,7 @@ import FileExplorer from '../components/FileExplorer'
 import TabBar, { type EditorTab } from '../components/TabBar'
 import TerminalPanel from './TerminalPanel'
 import { getFileIconMeta } from '../utils/fileIcons'
+import { DARK_THEMES, LIGHT_THEMES, applyThemeCSSVars, defineMonacoThemes } from '../themes'
 
 type IDEPanelProps = {
   workspacePath: string
@@ -232,7 +233,9 @@ const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
         const settings = await window.api.getEditorSettings()
         if (isCancelled) return
         setAutoSave(settings.autoSave)
-        setTheme(settings.theme || 'vs-dark')
+        const savedTheme = settings.theme || 'one-dark-pro'
+        setTheme(savedTheme)
+        applyThemeCSSVars(savedTheme)
         setSidebarWidth(clamp(settings.sidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH))
         setTerminalHeight(
           clamp(
@@ -241,7 +244,7 @@ const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
             window.innerHeight * 0.6,
           ),
         )
-        monacoRef.current?.editor.setTheme(settings.theme || 'vs-dark')
+        monacoRef.current?.editor.setTheme(savedTheme)
       } catch (err) {
         console.error('Failed to load editor settings:', err)
       }
@@ -298,6 +301,7 @@ const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
 
   const handleBeforeMount: BeforeMount = (monaco) => {
     monacoRef.current = monaco
+    defineMonacoThemes(monaco)
     monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
       noSemanticValidation: false,
       noSyntaxValidation: false,
@@ -975,8 +979,20 @@ const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
   const updateTheme = (nextTheme: string) => {
     setTheme(nextTheme)
     monacoRef.current?.editor.setTheme(nextTheme)
+    applyThemeCSSVars(nextTheme)
     void window.api.saveEditorSetting('theme', nextTheme)
   }
+
+  // Listen for theme changes dispatched by StatusBar
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const themeId = (e as CustomEvent<string>).detail
+      setTheme(themeId)
+      monacoRef.current?.editor.setTheme(themeId)
+    }
+    window.addEventListener('strata:theme-change', handler)
+    return () => window.removeEventListener('strata:theme-change', handler)
+  }, [])
 
   const runSearch = async () => {
     const query = searchQuery.trim()
@@ -998,7 +1014,7 @@ const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
   }
 
   return (
-    <div className="flex h-full w-full flex-col bg-zinc-950 text-zinc-100">
+    <div className="flex h-full w-full flex-col bg-zinc-950 text-zinc-100" style={{ background: 'var(--strata-bg)', color: 'var(--strata-text)' }}>
       <div className="relative flex min-h-0 flex-1">
         {sidebarPreviewWidth !== null && (
           <div
@@ -1010,7 +1026,7 @@ const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
           <>
             <aside
               className="flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-900"
-              style={{ width: sidebarWidth }}
+              style={{ width: sidebarWidth, background: 'var(--strata-sidebar)', borderColor: 'var(--strata-border)' }}
             >
               <div className="flex shrink-0 items-center gap-0.5 border-b border-zinc-800 px-2 py-1.5">
                 <button
@@ -1222,9 +1238,16 @@ const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
             onChange={(event) => updateTheme(event.target.value)}
             className="rounded border border-zinc-700 bg-zinc-950 px-1 py-0.5 text-[11px] text-zinc-200 outline-none"
           >
-            <option value="vs-dark">vs-dark</option>
-            <option value="vs">vs</option>
-            <option value="hc-black">hc-black</option>
+            <optgroup label="Dark">
+              {DARK_THEMES.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Light">
+              {LIGHT_THEMES.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </optgroup>
           </select>
         </label>
       </div>

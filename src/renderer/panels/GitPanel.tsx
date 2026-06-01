@@ -266,7 +266,7 @@ export default function GitPanel({ workspacePath, onOpenDiff }: Props) {
       )}
 
       {/* sidebar */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-r border-zinc-800 bg-zinc-900">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-r border-zinc-800 bg-zinc-900" style={{ background: 'var(--strata-sidebar)', borderColor: 'var(--strata-border)', color: 'var(--strata-text)' }}>
 
         {/* ── Branch row ── */}
         <div className="relative flex shrink-0 items-center gap-1 border-b border-zinc-800 px-2 py-1.5">

@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* Default Strata theme vars (One Dark Pro) — overridden at runtime by applyThemeCSSVars() */
+:root {
+  --strata-bg: #282c34;
+  --strata-sidebar: #21252b;
+  --strata-tab-bar: #21252b;
+  --strata-tab-active: #282c34;
+  --strata-border: #181a1f;
+  --strata-status-bar: #21252b;
+  --strata-text: #abb2bf;
+  --strata-accent: #61afef;
+}
+
 html,
 body,
 #root {

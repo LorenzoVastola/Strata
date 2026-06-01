@@ -318,6 +318,7 @@ export default function DBPanel() {
   const [tabs, setTabs] = useState<DbTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<DbContextMenu | null>(null)
+  const [theme, setTheme] = useState('one-dark-pro')
 
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId) ?? null, [activeTabId, tabs])
   const selectedConnection = connections.find((connection) => connection.id === selectedConnectionId) ?? null
@@ -358,6 +359,13 @@ export default function DBPanel() {
 
   useEffect(() => {
     void loadConnections()
+  }, [])
+
+  useEffect(() => {
+    window.api.getEditorSettings().then((s) => setTheme(s.theme || 'one-dark-pro')).catch(() => {})
+    const handler = (e: Event) => setTheme((e as CustomEvent<string>).detail)
+    window.addEventListener('strata:theme-change', handler)
+    return () => window.removeEventListener('strata:theme-change', handler)
   }, [])
 
   useEffect(() => {
@@ -722,8 +730,8 @@ export default function DBPanel() {
     : null
 
   return (
-    <div className="relative flex h-full w-full bg-zinc-950 text-zinc-100">
-      <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-zinc-900">
+    <div className="relative flex h-full w-full bg-zinc-950 text-zinc-100" style={{ background: 'var(--strata-bg)', color: 'var(--strata-text)' }}>
+      <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-zinc-900" style={{ background: 'var(--strata-sidebar)', borderColor: 'var(--strata-border)' }}>
         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
           <Database className="h-4 w-4 text-zinc-400" />
           <span className="min-w-0 flex-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
@@ -937,13 +945,14 @@ export default function DBPanel() {
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <div className="tabbar-scroll flex h-9 shrink-0 overflow-x-auto border-b border-zinc-800 bg-zinc-950">
+        <div className="tabbar-scroll flex h-9 shrink-0 overflow-x-auto border-b border-zinc-800 bg-zinc-950" style={{ background: 'var(--strata-tab-bar)', borderColor: 'var(--strata-border)' }}>
           {tabs.map((tab) => (
             <div
               key={tab.id}
               className={`flex h-9 min-w-40 items-center gap-2 border-r border-zinc-800 px-3 text-xs ${
                 tab.id === activeTabId ? 'bg-zinc-900 text-zinc-100' : 'text-zinc-500'
               }`}
+              style={tab.id === activeTabId ? { background: 'var(--strata-tab-active)', color: 'var(--strata-text)', borderColor: 'var(--strata-border)' } : { borderColor: 'var(--strata-border)' }}
             >
               <button type="button" onClick={() => setActiveTabId(tab.id)} className="min-w-0 flex-1 truncate text-left">
                 {tab.title}
@@ -1089,7 +1098,7 @@ export default function DBPanel() {
               <Editor
                 height="100%"
                 language="sql"
-                theme="vs-dark"
+                theme={theme}
                 value={activeTab.sql}
                 onChange={(value) => {
                   const sql = value ?? ''
