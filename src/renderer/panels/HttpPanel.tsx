@@ -473,6 +473,7 @@ export default function HttpPanel() {
   const [captureDraft, setCaptureDraft] = useState<HttpResponseCapture>({ id: uid(), jsonPath: '$.', variable: '', enabled: true })
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [requestPanePercent, setRequestPanePercent] = useState(50)
+  const [theme, setTheme] = useState('one-dark-pro')
 
   const activeEnvironment = environments.find((environment) => environment.id === draft?.environmentId) ?? null
   const globalsEnvironment = environments.find((environment) => environment.name.toLowerCase() === 'globals') ?? null
@@ -508,6 +509,13 @@ export default function HttpPanel() {
   useEffect(() => {
     void loadAll()
     void loadLayout()
+  }, [])
+
+  useEffect(() => {
+    window.api.getEditorSettings().then((s) => setTheme(s.theme || 'one-dark-pro')).catch(() => {})
+    const handler = (e: Event) => setTheme((e as CustomEvent<string>).detail)
+    window.addEventListener('strata:theme-change', handler)
+    return () => window.removeEventListener('strata:theme-change', handler)
   }, [])
 
   useEffect(() => {
@@ -923,8 +931,8 @@ export default function HttpPanel() {
   }
 
   return (
-    <div className="relative flex h-full w-full bg-zinc-950 text-zinc-100">
-      <aside className="relative flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-900" style={{ width: sidebarWidth }}>
+    <div className="relative flex h-full w-full bg-zinc-950 text-zinc-100" style={{ background: 'var(--strata-bg)', color: 'var(--strata-text)' }}>
+      <aside className="relative flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-900" style={{ width: sidebarWidth, background: 'var(--strata-sidebar)', borderColor: 'var(--strata-border)' }}>
         <div className="flex h-10 items-center gap-2 border-b border-zinc-800 px-3">
           <Zap className="h-4 w-4 text-zinc-400" />
           <span className="flex-1 text-xs font-medium uppercase tracking-wide text-zinc-400">HTTP</span>
@@ -1227,9 +1235,9 @@ export default function HttpPanel() {
           {urlMissingVariables.map((variable) => <span key={variable} className="rounded bg-red-950/60 px-1.5 py-0.5 text-red-300">{`{{${variable}}}`}</span>)}
         </div>
         {openTabs.length > 0 && (
-          <div className="flex h-9 shrink-0 items-center overflow-x-auto border-b border-zinc-800 bg-zinc-950 px-2 text-xs">
+          <div className="flex h-9 shrink-0 items-center overflow-x-auto border-b border-zinc-800 bg-zinc-950 px-2 text-xs" style={{ background: 'var(--strata-tab-bar)', borderColor: 'var(--strata-border)' }}>
             {openTabs.map((tab) => (
-              <button key={tab.id ?? tab.name} type="button" onClick={() => { setDraft(tab); setActiveRequestId(tab.id ?? null) }} className={`flex h-7 min-w-36 max-w-56 items-center gap-2 border-r border-zinc-800 px-3 ${draft?.id === tab.id ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-200'}`}>
+              <button key={tab.id ?? tab.name} type="button" onClick={() => { setDraft(tab); setActiveRequestId(tab.id ?? null) }} className={`flex h-7 min-w-36 max-w-56 items-center gap-2 border-r border-zinc-800 px-3 ${draft?.id === tab.id ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-200'}`} style={draft?.id === tab.id ? { background: 'var(--strata-tab-active)', color: 'var(--strata-text)', borderColor: 'var(--strata-border)' } : { borderColor: 'var(--strata-border)' }}>
                 <span className={`font-semibold ${methodClass[tab.method]}`}>{tab.method}</span>
                 <span className="min-w-0 flex-1 truncate text-left">{tab.name}</span>
                 <X className="h-3.5 w-3.5" onClick={(event) => { event.stopPropagation(); setOpenTabs((tabs) => tabs.filter((item) => item.id !== tab.id)); if (draft?.id === tab.id) closeActiveTab() }} />
@@ -1274,7 +1282,7 @@ export default function HttpPanel() {
                 )}
               </div>
               {draft.body.type === 'raw' ? (
-                <Editor height="100%" language={draft.body.rawType === 'xml' ? 'xml' : draft.body.rawType === 'json' ? 'json' : 'text'} theme="vs-dark" value={draft.body.raw ?? ''} onChange={(value) => updateDraft({ body: { ...draft.body, raw: value ?? '' } })} options={{ minimap: { enabled: false }, fontSize: 13 }} />
+                <Editor height="100%" language={draft.body.rawType === 'xml' ? 'xml' : draft.body.rawType === 'json' ? 'json' : 'text'} theme={theme} value={draft.body.raw ?? ''} onChange={(value) => updateDraft({ body: { ...draft.body, raw: value ?? '' } })} options={{ minimap: { enabled: false }, fontSize: 13 }} />
               ) : draft.body.type === 'form-data' || draft.body.type === 'x-www-form-urlencoded' ? (
                 <KeyValueEditor rows={draft.body.fields ?? []} onChange={(fields) => updateDraft({ body: { ...draft.body, fields } })} />
               ) : (
@@ -1335,7 +1343,7 @@ export default function HttpPanel() {
                 <Editor
                   height="100%"
                   language="javascript"
-                  theme="vs-dark"
+                  theme={theme}
                   value={draft.scripts?.preRequest ?? ''}
                   onChange={(value) => updateDraft({ scripts: { ...(draft.scripts ?? {}), preRequest: value ?? '' } })}
                   options={{ minimap: { enabled: false }, fontSize: 12 }}
@@ -1346,7 +1354,7 @@ export default function HttpPanel() {
                 <Editor
                   height="100%"
                   language="javascript"
-                  theme="vs-dark"
+                  theme={theme}
                   value={draft.scripts?.postResponse ?? ''}
                   onChange={(value) => updateDraft({ scripts: { ...(draft.scripts ?? {}), postResponse: value ?? '' } })}
                   options={{ minimap: { enabled: false }, fontSize: 12 }}
@@ -1396,7 +1404,7 @@ export default function HttpPanel() {
           {!response ? (
             <div className={`flex flex-1 items-center justify-center text-sm ${responseError ? 'text-red-300' : 'text-zinc-500'}`}>{responseError ?? 'Send a request to inspect the response'}</div>
           ) : responseTab === 'body' ? (
-            <Editor height="100%" language={bodyLanguage(response.body)} theme="vs-dark" value={prettyBody(response.body, rawResponse)} options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13 }} />
+            <Editor height="100%" language={bodyLanguage(response.body)} theme={theme} value={prettyBody(response.body, rawResponse)} options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13 }} />
           ) : responseTab === 'headers' ? (
             <div className="overflow-auto p-3 text-xs">
               {Object.entries(response.headers).map(([key, value]) => (

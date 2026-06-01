@@ -45,7 +45,7 @@ export default function App() {
     <div className="flex flex-col h-screen w-screen overflow-hidden">
       <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
         {/* ── Activity bar ── */}
-        <aside className="flex h-full w-12 shrink-0 flex-col items-center gap-2 bg-zinc-900 py-3">
+        <aside className="flex h-full w-12 shrink-0 flex-col items-center gap-2 bg-zinc-900 py-3" style={{ background: 'var(--strata-sidebar)', borderRight: '1px solid var(--strata-border)' }}>
           <button
             type="button"
             onClick={() => selectPanel("ide")}
@@ -106,7 +106,7 @@ export default function App() {
         </aside>
 
         {/* ── Main area ── */}
-        <main className="h-full min-w-0 flex-1 overflow-hidden">
+        <main className="h-full min-w-0 flex-1 overflow-hidden" style={{ background: 'var(--strata-bg)' }}>
           {/* No workspace: show Home for ide/git panels */}
           {!workspacePath && (activePanel === "ide" || activePanel === "git") ? (
             <Home onOpenWorkspace={handleOpenWorkspace} onOpenDbConnection={() => setActivePanel("db")} />

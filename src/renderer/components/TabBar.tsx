@@ -37,6 +37,7 @@ export default function TabBar({
   return (
     <div
       className="tabbar-scroll flex h-9 shrink-0 overflow-x-auto border-b border-zinc-800 bg-zinc-950"
+      style={{ background: 'var(--strata-tab-bar)', borderColor: 'var(--strata-border)' }}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault()
@@ -76,6 +77,10 @@ export default function TabBar({
                 ? 'bg-zinc-900 text-zinc-100'
                 : 'bg-transparent text-zinc-500 hover:bg-zinc-900/60 hover:text-zinc-300'
             }`}
+            style={isActive
+              ? { background: 'var(--strata-tab-active)', color: 'var(--strata-text)', borderColor: 'var(--strata-border)' }
+              : { borderColor: 'var(--strata-border)' }
+            }
           >
             {tab.diff
               ? <span className="text-[10px] font-bold text-amber-400 shrink-0 w-3.5 text-center">M</span>
