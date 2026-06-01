@@ -7,6 +7,7 @@ import { registerEditorIpc } from './ipc/editor'
 import { registerTerminalIpc } from './ipc/terminal'
 import { registerDatabaseIpc } from './ipc/database'
 import { registerHttpIpc } from './ipc/http'
+import { registerGitIpc } from './ipc/git'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -57,6 +58,7 @@ app.whenReady().then(() => {
   registerEditorIpc()
   registerDatabaseIpc()
   registerHttpIpc()
+  registerGitIpc()
   const win = createWindow()
   registerTerminalIpc(win)
 })
