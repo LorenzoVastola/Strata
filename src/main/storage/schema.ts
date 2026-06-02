@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 10
 
 export const migrations: Record<number, string> = {
   1: `
@@ -97,5 +97,41 @@ export const migrations: Record<number, string> = {
     ALTER TABLE http_requests ADD COLUMN scripts TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE http_requests ADD COLUMN response_captures TEXT NOT NULL DEFAULT '[]';
     UPDATE schema_meta SET version = 7;
+  `,
+  8: `
+    UPDATE schema_meta SET version = 8;
+  `,
+  9: `
+    CREATE TABLE IF NOT EXISTS ai_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      agent TEXT NOT NULL,
+      workspace_path TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      read_only INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS ai_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      agent TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS ai_session_files (
+      session_id TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(session_id, file_path),
+      FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE
+    );
+    UPDATE schema_meta SET version = 9;
+  `,
+  10: `
+    ALTER TABLE db_connections ADD COLUMN last_used_at TEXT;
+    UPDATE db_connections SET last_used_at = COALESCE(last_used_at, datetime('now'));
+    UPDATE schema_meta SET version = 10;
   `
 }

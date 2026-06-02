@@ -8,6 +8,7 @@ import { registerTerminalIpc } from './ipc/terminal'
 import { registerDatabaseIpc } from './ipc/database'
 import { registerHttpIpc } from './ipc/http'
 import { registerGitIpc } from './ipc/git'
+import { registerAiIpc } from './ipc/ai'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -60,6 +61,7 @@ app.whenReady().then(() => {
   registerHttpIpc()
   registerGitIpc()
   const win = createWindow()
+  registerAiIpc(win.webContents)
   registerTerminalIpc(win)
 })
 

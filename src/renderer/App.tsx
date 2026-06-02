@@ -1,7 +1,8 @@
-import { Code2, Database, GitBranch, Globe, SquareTerminal } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { Code2, Database, GitBranch, Globe, Sparkles, SquareTerminal } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Home from "./components/Home";
 import StatusBar from "./components/StatusBar";
+import AISidebar from "./components/AISidebar";
 import type { Workspace } from "./types/index";
 import DBPanel from "./panels/DBPanel";
 import GitPanel, { type DiffOpenRequest } from "./panels/GitPanel";
@@ -14,6 +15,10 @@ type ActivePanel = "ide" | "git" | "db" | "http" | "terminal";
 export default function App() {
   const [activePanel, setActivePanel] = useState<ActivePanel>("ide");
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiWidth, setAiWidth] = useState(320);
+  const [dbConnectionToOpen, setDbConnectionToOpen] = useState<number | null>(null);
+  const [newDbConnectionRequestId, setNewDbConnectionRequestId] = useState(0);
   const hasWorkspace = Boolean(workspacePath);
   const _workspaceTypeCheck: Workspace[] = [];
   void _workspaceTypeCheck;
@@ -29,10 +34,85 @@ export default function App() {
     setActivePanel("ide");
   };
 
+  const handleOpenDbConnection = (id: number) => {
+    setDbConnectionToOpen(id);
+    setActivePanel("db");
+  };
+
+  const handleNewDbConnection = () => {
+    setNewDbConnectionRequestId((id) => id + 1);
+    setActivePanel("db");
+  };
+
   const selectPanel = (panel: ActivePanel) => {
     if (!hasWorkspace && (panel === "ide" || panel === "git")) return;
     setActivePanel(panel);
   };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        setAiOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const buildAiContext = useCallback(async () => {
+    const editorContext = idePanelRef.current?.getContext() ?? { activeFile: null, openFiles: [] };
+    const context: Record<string, unknown> = {
+      ...editorContext,
+      workspacePath,
+      projectName: workspacePath?.split(/[\\/]/).pop() ?? null,
+      activeDatabase: null,
+      activeRequest: null,
+      lastResponse: null,
+      branch: null,
+      modifiedFiles: [],
+    };
+
+    try {
+      const connections = await window.api.database.listConnections();
+      const activeConnection = connections.find((connection) => connection.status === "connected") ?? connections[0];
+      if (activeConnection?.id) {
+        const schema = activeConnection.status === "connected" ? await window.api.database.getSchema(activeConnection.id).catch(() => []) : [];
+        context.activeDatabase = {
+          name: activeConnection.database,
+          driver: activeConnection.driver,
+          schema: { tables: schema.flatMap((node) => node.tables).map((table) => ({ name: table.name, columns: table.columns.map((column) => ({ name: column.name, type: column.type, key: column.columnKey })) })) },
+        };
+      }
+    } catch {
+      context.activeDatabase = null;
+    }
+
+    try {
+      const http = await window.api.http.list();
+      const activeRequest = http.requests.find((request) => request.id === http.activeRequestId) ?? http.requests[0];
+      const history = await window.api.http.history();
+      if (activeRequest) {
+        context.activeRequest = { method: activeRequest.method, url: activeRequest.url, headers: activeRequest.headers, body: activeRequest.body };
+      }
+      const last = history[0]?.response as { status?: number; body?: string } | undefined;
+      if (last) context.lastResponse = { status: last.status, body: String(last.body ?? "").slice(0, 500) };
+    } catch {
+      context.activeRequest = null;
+    }
+
+    if (workspacePath) {
+      try {
+        const status = await window.api.git.status(workspacePath);
+        context.branch = status.current;
+        context.modifiedFiles = [...status.staged, ...status.unstaged].map((file) => file.path);
+      } catch {
+        context.branch = null;
+      }
+    }
+
+    return context;
+  }, [workspacePath]);
 
   // Whether to show a non-IDE panel in main area
   const showOtherPanel = activePanel === "db" || activePanel === "http" || activePanel === "terminal";
@@ -92,30 +172,40 @@ export default function App() {
           >
             <Globe className="h-5 w-5" />
           </button>
+       
           <button
             type="button"
-            onClick={() => selectPanel("terminal")}
-            title="Terminale"
-            className={`rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white ${
-              activePanel === "terminal" ? "bg-zinc-800 text-white" : ""
+            onClick={() => setAiOpen((open) => !open)}
+            title="AI Assistant (Ctrl+L)"
+            className={`mt-auto rounded-md p-2 text-zinc-300 transition hover:bg-zinc-800 hover:text-white ${
+              aiOpen ? "bg-zinc-800 text-white" : ""
             }`}
-            aria-label="Open Terminal panel"
+            aria-label="Open AI sidebar"
           >
-            <SquareTerminal className="h-5 w-5" />
+            <Sparkles className="h-5 w-5" />
           </button>
         </aside>
 
         {/* ── Main area ── */}
-        <main className="h-full min-w-0 flex-1 overflow-hidden" style={{ background: 'var(--strata-bg)' }}>
+        <main className="relative h-full min-w-0 flex-1 overflow-hidden" style={{ background: 'var(--strata-bg)' }}>
           {/* No workspace: show Home for ide/git panels */}
           {!workspacePath && (activePanel === "ide" || activePanel === "git") ? (
-            <Home onOpenWorkspace={handleOpenWorkspace} onOpenDbConnection={() => setActivePanel("db")} />
+            <Home
+              onOpenWorkspace={handleOpenWorkspace}
+              onOpenDbConnection={handleOpenDbConnection}
+              onNewDbConnection={handleNewDbConnection}
+            />
           ) : (
             <div className="flex h-full w-full">
               {/* ── Non-IDE panels (db/http/terminal) ── */}
               {showOtherPanel && (
                 <div className="flex h-full w-full">
-                  {activePanel === "db" && <DBPanel />}
+                  {activePanel === "db" && (
+                    <DBPanel
+                      initialConnectionId={dbConnectionToOpen}
+                      newConnectionRequestId={newDbConnectionRequestId}
+                    />
+                  )}
                   {activePanel === "http" && <HttpPanel />}
                   {activePanel === "terminal" && <TerminalPanel workspacePath={workspacePath ?? undefined} />}
                 </div>
@@ -144,6 +234,15 @@ export default function App() {
               )}
             </div>
           )}
+          <AISidebar
+            open={aiOpen}
+            width={aiWidth}
+            onWidthChange={setAiWidth}
+            onClose={() => setAiOpen(false)}
+            workspacePath={workspacePath}
+            buildContext={buildAiContext}
+            insertCode={(code) => idePanelRef.current?.insertAtCursor(code)}
+          />
         </main>
       </div>
 
