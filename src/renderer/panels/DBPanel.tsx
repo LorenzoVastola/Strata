@@ -17,7 +17,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 type DbTab =
   | {
@@ -47,6 +47,11 @@ type DbTab =
     }
 
 type Toast = { kind: 'success' | 'error'; message: string } | null
+
+type DBPanelProps = {
+  initialConnectionId?: number | null
+  newConnectionRequestId?: number
+}
 
 type DbContextMenu =
   | { kind: 'connection'; x: number; y: number; connection: DbConnection }
@@ -304,7 +309,7 @@ function TableProperties({ table }: { table: DbTable | null }) {
   )
 }
 
-export default function DBPanel() {
+export default function DBPanel({ initialConnectionId = null, newConnectionRequestId = 0 }: DBPanelProps) {
   const [connections, setConnections] = useState<DbConnection[]>([])
   const [schemas, setSchemas] = useState<Record<number, DbSchemaNode[]>>({})
   const [schemaLoading, setSchemaLoading] = useState<Record<number, boolean>>({})
@@ -319,6 +324,8 @@ export default function DBPanel() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<DbContextMenu | null>(null)
   const [theme, setTheme] = useState('one-dark-pro')
+  const handledInitialConnectionRef = useRef<number | null>(null)
+  const handledNewConnectionRequestRef = useRef(0)
 
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId) ?? null, [activeTabId, tabs])
   const selectedConnection = connections.find((connection) => connection.id === selectedConnectionId) ?? null
@@ -659,6 +666,49 @@ export default function DBPanel() {
     setTestState('success')
     setDialogOpen(true)
   }
+
+  useEffect(() => {
+    if (!initialConnectionId) return
+    if (handledInitialConnectionRef.current === initialConnectionId) return
+    const target = connections.find((connection) => connection.id === initialConnectionId)
+    if (!target) return
+
+    handledInitialConnectionRef.current = initialConnectionId
+    setSelectedConnectionId(initialConnectionId)
+    setExpanded((prev) => new Set(prev).add(`connection:${initialConnectionId}`))
+    setSchemaLoading((prev) => ({ ...prev, [initialConnectionId]: true }))
+    void (async () => {
+      try {
+        await window.api.database.connect(initialConnectionId)
+        const schema = await window.api.database.getSchema(initialConnectionId)
+        setSchemas((prev) => ({ ...prev, [initialConnectionId]: schema }))
+        setConnections((prev) =>
+          prev.map((connection) =>
+            connection.id === initialConnectionId ? { ...connection, status: 'connected' } : connection,
+          ),
+        )
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setConnections((prev) =>
+          prev.map((connection) =>
+            connection.id === initialConnectionId ? { ...connection, status: 'error', statusError: message } : connection,
+          ),
+        )
+        setToast({ kind: 'error', message })
+        window.setTimeout(() => setToast(null), 2800)
+      } finally {
+        setSchemaLoading((prev) => ({ ...prev, [initialConnectionId]: false }))
+      }
+    })()
+  }, [connections, initialConnectionId])
+
+  useEffect(() => {
+    if (!newConnectionRequestId) return
+    if (handledNewConnectionRequestRef.current === newConnectionRequestId) return
+
+    handledNewConnectionRequestRef.current = newConnectionRequestId
+    openNewConnectionDialog()
+  }, [newConnectionRequestId])
 
   const disconnectConnection = async (connectionId: number) => {
     await window.api.database.disconnect(connectionId)

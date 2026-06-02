@@ -115,6 +115,58 @@ contextBridge.exposeInMainWorld('api', {
     getDiff: (workspacePath: string, filePath: string, isStaged: boolean) =>
       ipcRenderer.invoke('git:getDiff', workspacePath, filePath, isStaged),
   },
+
+      ai: {
+        verifyProvider: (provider: string) => ipcRenderer.invoke('ai:verifyProvider', provider),
+        getWarmStatus: () => ipcRenderer.invoke('ai:getWarmStatus'),
+        listSessions: () => ipcRenderer.invoke('ai:listSessions'),
+        startSession: (payload: AiStartSessionPayload) => ipcRenderer.invoke('ai:startSession', payload),
+        getSession: (sessionId: string) => ipcRenderer.invoke('ai:getSession', sessionId),
+        deleteSession: (sessionId: string) => ipcRenderer.invoke('ai:deleteSession', sessionId),
+        killSession: (sessionId: string) => ipcRenderer.invoke('ai:killSession', sessionId),
+        send: (payload: AiSendPayload) => ipcRenderer.invoke('ai:send', payload),
+        respondPermission: (payload: AiPermissionResponsePayload) => ipcRenderer.invoke('ai:permissionResponse', payload),
+        onChunk: (callback: (payload: { sessionId: string; requestId: string; chunk: string }) => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, payload: { sessionId: string; requestId: string; chunk: string }) => callback(payload)
+          ipcRenderer.on('ai:chunk', listener)
+          return () => ipcRenderer.removeListener('ai:chunk', listener)
+        },
+        onPermission: (callback: (payload: AiPermissionRequestPayload) => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, payload: AiPermissionRequestPayload) => callback(payload)
+          ipcRenderer.on('ai:permission', listener)
+          return () => ipcRenderer.removeListener('ai:permission', listener)
+        },
+        onSessionStatus: (callback: (payload: AiSessionStatusPayload) => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, payload: AiSessionStatusPayload) => callback(payload)
+          ipcRenderer.on('ai:sessionStatus', listener)
+          return () => ipcRenderer.removeListener('ai:sessionStatus', listener)
+        },
+        onWarmStarting: (callback: (payload: AiWarmStatusPayload) => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, payload: AiWarmStatusPayload) => callback(payload)
+          ipcRenderer.on('ai:warmStarting', listener)
+          return () => ipcRenderer.removeListener('ai:warmStarting', listener)
+        },
+        onWarmReady: (callback: (payload: AiWarmStatusPayload) => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, payload: AiWarmStatusPayload) => callback(payload)
+          ipcRenderer.on('ai:warmReady', listener)
+          return () => ipcRenderer.removeListener('ai:warmReady', listener)
+        },
+        onWarmFailed: (callback: (payload: AiWarmStatusPayload) => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, payload: AiWarmStatusPayload) => callback(payload)
+          ipcRenderer.on('ai:warmFailed', listener)
+          return () => ipcRenderer.removeListener('ai:warmFailed', listener)
+        },
+        onDone: (callback: (payload: { sessionId: string; requestId: string }) => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, payload: { sessionId: string; requestId: string }) => callback(payload)
+          ipcRenderer.on('ai:done', listener)
+          return () => ipcRenderer.removeListener('ai:done', listener)
+        },
+        onError: (callback: (payload: { sessionId: string; requestId: string; error: string }) => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, payload: { sessionId: string; requestId: string; error: string }) => callback(payload)
+          ipcRenderer.on('ai:error', listener)
+          return () => ipcRenderer.removeListener('ai:error', listener)
+        },
+      },
 })
 
 // Tipi globali per TypeScript nel renderer
@@ -154,6 +206,7 @@ declare global {
     id: number
     status?: 'connected' | 'disconnected' | 'error'
     statusError?: string
+    lastUsedAt?: string
   }
   type DbColumn = {
     name: string
@@ -239,6 +292,64 @@ declare global {
     headers: Record<string, string>
     timeline: { dns: number; tcp: number; ttfb: number; download: number }
     url: string
+  }
+  type AiAgent = 'auto' | 'claude' | 'codex'
+  type AiMessageRole = 'user' | 'assistant'
+  type AiChatMessage = {
+    id: string
+    role: AiMessageRole
+    content: string
+    agent?: 'claude' | 'codex'
+    createdAt?: string
+  }
+  type AiSessionSummary = {
+    id: string
+    title: string
+    agent: 'claude' | 'codex'
+    workspacePath: string
+    createdAt: string
+    updatedAt: string
+    files: string[]
+  }
+  type AiSavedSession = AiSessionSummary & {
+    messages: AiChatMessage[]
+    readOnly: boolean
+  }
+  type AiSendPayload = {
+    sessionId: string
+    requestId: string
+    workspacePath: string
+    system: string
+    messages: { role: AiMessageRole; content: string }[]
+    agentMode: AiAgent
+  }
+  type AiStartSessionPayload = {
+    sessionId: string
+    workspacePath: string
+    agentMode: AiAgent
+  }
+  type AiSessionStatus = 'active' | 'waiting-permission' | 'terminated' | 'processing'
+  type AiSessionStatusPayload = {
+    sessionId: string
+    status: AiSessionStatus
+  }
+  type AiWarmStatusPayload = {
+    provider: 'claude' | 'codex'
+  }
+  type AiPermissionDiff = {
+    file: string
+    additions: string[]
+    removals: string[]
+  }
+  type AiPermissionRequestPayload = {
+    sessionId: string
+    requestId: string
+    text: string
+    diffs: AiPermissionDiff[]
+  }
+  type AiPermissionResponsePayload = {
+    sessionId: string
+    approved: boolean
   }
 
   interface Window {
@@ -345,6 +456,25 @@ declare global {
         history: () => Promise<{ id: number; request: Record<string, unknown>; response: Record<string, unknown>; executedAt: string }[]>
         deleteHistory: (id: number) => Promise<boolean>
         send: (request: HttpRequest) => Promise<HttpResponse>
+      }
+      ai: {
+        verifyProvider: (provider: string) => Promise<boolean>
+        getWarmStatus: () => Promise<Record<'claude' | 'codex', 'warming' | 'ready' | 'failed'>>
+        listSessions: () => Promise<AiSessionSummary[]>
+        startSession: (payload: AiStartSessionPayload) => Promise<boolean>
+        getSession: (sessionId: string) => Promise<AiSavedSession | null>
+        deleteSession: (sessionId: string) => Promise<boolean>
+        killSession: (sessionId: string) => Promise<boolean>
+        send: (payload: AiSendPayload) => Promise<void>
+        respondPermission: (payload: AiPermissionResponsePayload) => Promise<boolean>
+        onChunk: (callback: (payload: { sessionId: string; requestId: string; chunk: string }) => void) => () => void
+        onPermission: (callback: (payload: AiPermissionRequestPayload) => void) => () => void
+        onSessionStatus: (callback: (payload: AiSessionStatusPayload) => void) => () => void
+        onWarmStarting: (callback: (payload: AiWarmStatusPayload) => void) => () => void
+        onWarmReady: (callback: (payload: AiWarmStatusPayload) => void) => () => void
+        onWarmFailed: (callback: (payload: AiWarmStatusPayload) => void) => () => void
+        onDone: (callback: (payload: { sessionId: string; requestId: string }) => void) => () => void
+        onError: (callback: (payload: { sessionId: string; requestId: string; error: string }) => void) => () => void
       }
     }
   }

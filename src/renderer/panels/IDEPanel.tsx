@@ -22,6 +22,11 @@ export type IDEPanelHandle = {
     modified: string
     filePath?: string
   }) => void
+  getContext: () => {
+    activeFile: { path: string; language: string; content: string; cursorLine: number; selection: string } | null
+    openFiles: { path: string; language: string }[]
+  }
+  insertAtCursor: (code: string) => void
 }
 
 type SearchResult = {
@@ -732,7 +737,30 @@ const IDEPanel = forwardRef<IDEPanelHandle, IDEPanelProps>(function IDEPanel(
     setActivePath(path)
   }, [tabs, activePanelId])
 
-  useImperativeHandle(ref, () => ({ openDiffTab }), [openDiffTab])
+  const getContext = useCallback(() => {
+    const editor = editorRefs.current[activePanelId]
+    const selection = editor?.getSelection()
+    const selectedText = selection && !selection.isEmpty() ? editor.getModel()?.getValueInRange(selection) ?? '' : ''
+    return {
+      activeFile: activeTab ? {
+        path: activeTab.path,
+        language: activeTab.language,
+        content: activeTab.content,
+        cursorLine: editor?.getPosition()?.lineNumber ?? 1,
+        selection: selectedText,
+      } : null,
+      openFiles: tabs.filter((tab) => !tab.diff).map((tab) => ({ path: tab.path, language: tab.language })),
+    }
+  }, [activePanelId, activeTab, tabs])
+
+  const insertAtCursor = useCallback((code: string) => {
+    const editor = editorRefs.current[activePanelId]
+    if (!editor) return
+    editor.executeEdits('strata-ai', [{ range: editor.getSelection() ?? editor.getModel()!.getFullModelRange(), text: code, forceMoveMarkers: true }])
+    editor.focus()
+  }, [activePanelId])
+
+  useImperativeHandle(ref, () => ({ openDiffTab, getContext, insertAtCursor }), [openDiffTab, getContext, insertAtCursor])
 
   const changeActiveLanguage = useCallback(() => {
     if (!activeTab || !monacoRef.current) return

@@ -1,4 +1,4 @@
-import { Copy, FolderOpen, GitBranch, X } from 'lucide-react'
+import { Copy, Database, FolderOpen, GitBranch, Plus, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 type RecentWorkspace = {
@@ -11,13 +11,17 @@ type RecentWorkspace = {
 type RecentDbConnection = {
   id: number
   name: string
-  type: 'mysql' | 'postgres' | 'sqlite'
-  host: string | null
+  driver: DbDriver
+  host: string
+  port: number
+  status?: 'connected' | 'disconnected' | 'error'
+  lastUsedAt?: string
 }
 
 type HomeProps = {
   onOpenWorkspace: (path: string, name: string) => void
   onOpenDbConnection: (id: number) => void
+  onNewDbConnection: () => void
 }
 
 function formatLastOpened(iso: string): string {
@@ -26,27 +30,42 @@ function formatLastOpened(iso: string): string {
   return date.toLocaleString()
 }
 
-function formatDbType(type: RecentDbConnection['type']): string {
-  const labels: Record<RecentDbConnection['type'], string> = {
+function formatRelativeDate(iso?: string): string {
+  if (!iso) return 'mai usata'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'mai usata'
+  const seconds = Math.max(1, Math.floor((Date.now() - date.getTime()) / 1000))
+  if (seconds < 60) return 'ora'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} min fa`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} ore fa`
+  const days = Math.floor(hours / 24)
+  return `${days} giorni fa`
+}
+
+function formatDbType(type: RecentDbConnection['driver']): string {
+  const labels: Record<RecentDbConnection['driver'], string> = {
     mysql: 'MySQL',
     postgres: 'PostgreSQL',
-    sqlite: 'SQLite',
   }
   return labels[type]
 }
 
 async function fetchRecentDbConnections(): Promise<RecentDbConnection[]> {
-  const getRecent = (
-    window.api as { getRecentDbConnections?: () => Promise<RecentDbConnection[]> }
-  ).getRecentDbConnections
-
-  if (typeof getRecent === 'function') {
-    return getRecent()
-  }
-  return []
+  const connections = await window.api.database.listConnections()
+  return connections.map((connection) => ({
+    id: connection.id,
+    name: connection.name,
+    driver: connection.driver,
+    host: connection.host,
+    port: connection.port,
+    status: connection.status,
+    lastUsedAt: connection.lastUsedAt,
+  }))
 }
 
-export default function Home({ onOpenWorkspace, onOpenDbConnection }: HomeProps) {
+export default function Home({ onOpenWorkspace, onOpenDbConnection, onNewDbConnection }: HomeProps) {
   const [recent, setRecent] = useState<RecentWorkspace[]>([])
   const [recentDb, setRecentDb] = useState<RecentDbConnection[]>([])
   const [loading, setLoading] = useState(true)
@@ -257,20 +276,38 @@ export default function Home({ onOpenWorkspace, onOpenDbConnection }: HomeProps)
           {loading ? (
             <p className="text-sm text-zinc-500">Caricamento...</p>
           ) : recentDb.length === 0 ? (
-            <p className="text-sm text-zinc-500">Nessuna connessione recente</p>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
+              <p className="mb-3 text-sm text-zinc-500">Nessuna connessione salvata</p>
+              <button
+                type="button"
+                onClick={onNewDbConnection}
+                className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-sky-500"
+              >
+                <Plus className="h-4 w-4" />
+                Nuova connessione
+              </button>
+            </div>
           ) : (
-            <ul className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/40">
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {recentDb.map((conn) => (
                 <li key={conn.id}>
                   <button
                     type="button"
                     onClick={() => onOpenDbConnection(conn.id)}
-                    className="flex w-full flex-col gap-0.5 px-4 py-3 text-left transition hover:bg-zinc-800/80"
+                    className="flex w-full items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-left transition hover:border-zinc-600 hover:bg-zinc-900"
                   >
-                    <span className="text-sm font-medium text-zinc-200">{conn.name}</span>
-                    <span className="text-xs text-zinc-500">
-                      {formatDbType(conn.type)}
-                      {conn.host ? ` · ${conn.host}` : ' · locale'}
+                    <span className="relative rounded-md bg-zinc-950 p-2">
+                      <Database className="h-5 w-5 text-sky-400" />
+                      <span className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-zinc-900 ${conn.status === 'connected' ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-zinc-200">{conn.name}</span>
+                      <span className="mt-1 block text-xs text-zinc-500">
+                        {formatDbType(conn.driver)} · {conn.host}:{conn.port}
+                      </span>
+                      <span className="mt-1 block text-xs text-zinc-600">
+                        Ultimo utilizzo {formatRelativeDate(conn.lastUsedAt)}
+                      </span>
                     </span>
                   </button>
                 </li>

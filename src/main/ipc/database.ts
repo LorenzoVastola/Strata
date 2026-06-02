@@ -125,6 +125,10 @@ const getSavedConnection = (connectionId: number) => {
   `).get(connectionId) as SavedConnection | undefined
 }
 
+const touchConnection = (connectionId: number) => {
+  getDb().prepare('UPDATE db_connections SET last_used_at = ? WHERE id = ?').run(new Date().toISOString(), connectionId)
+}
+
 const createPool = (connection: SavedConnection) => {
   const password = decryptPassword(connection.encrypted_password)
 
@@ -189,6 +193,7 @@ const reconnect = async (connectionId: number) => {
     await testPool(entry)
     pools.set(connectionId, entry)
     setConnectionState(connectionId, 'connected')
+    touchConnection(connectionId)
     console.log('[db:reconnect] inserted in Map', {
       insertedId: connectionId,
       insertedIdType: typeof connectionId,
@@ -464,9 +469,9 @@ const buildSchemaTree = (
 export function registerDatabaseIpc(): void {
   ipcMain.handle('db:listConnections', () => {
     const savedConnections = getDb().prepare(`
-      SELECT id, type AS driver, name, host, port, user, database
+      SELECT id, type AS driver, name, host, port, user, database, last_used_at AS lastUsedAt
       FROM db_connections
-      ORDER BY name
+      ORDER BY COALESCE(last_used_at, '') DESC, name
     `).all() as Array<Record<string, unknown> & { id: number }>
 
     return savedConnections.map((connection) => {
@@ -496,6 +501,7 @@ export function registerDatabaseIpc(): void {
     )
 
     const connectionId = Number(result.lastInsertRowid)
+    touchConnection(connectionId)
     setConnectionState(connectionId, 'disconnected')
     console.log('[db:saveConnection] saved sqlite row', logSavedConnection(getSavedConnection(connectionId)))
     console.log('[db:saveConnection] pools after save', {
