@@ -9,6 +9,8 @@ import { registerDatabaseIpc } from './ipc/database'
 import { registerHttpIpc } from './ipc/http'
 import { registerGitIpc } from './ipc/git'
 import { registerAiIpc } from './ipc/ai'
+import { registerEnvironmentIpc, setMainWebContents } from './environment'
+import { startMcpServer, stopMcpServer } from './mcp/server'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -60,12 +62,16 @@ app.whenReady().then(() => {
   registerDatabaseIpc()
   registerHttpIpc()
   registerGitIpc()
+  registerEnvironmentIpc()
   const win = createWindow()
+  setMainWebContents(win.webContents)
   registerAiIpc(win.webContents)
+  void startMcpServer().catch((error) => console.error('[MCP] failed to start', error))
   registerTerminalIpc(win)
 })
 
 app.on('window-all-closed', () => {
+  stopMcpServer()
   if (process.platform !== 'darwin') app.quit()
 })
 

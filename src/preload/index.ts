@@ -24,6 +24,17 @@ contextBridge.exposeInMainWorld('api', {
   // Editor
   readFile: (filePath: string) => ipcRenderer.invoke('editor:readFile', filePath),
   writeFile: (filePath: string, content: string) => ipcRenderer.invoke('editor:writeFile', filePath, content),
+  onEditorInsertCode: (callback: (payload: { code: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { code: string }) => callback(payload)
+    ipcRenderer.on('editor:insertCode', listener)
+    return () => ipcRenderer.removeListener('editor:insertCode', listener)
+  },
+
+  // AI environment
+  environment: {
+    setDb: (connectionId: string | number | null) => ipcRenderer.invoke('env:setDb', connectionId),
+    setHttpCollection: (collectionId: string | number | null) => ipcRenderer.invoke('env:setHttpCollection', collectionId),
+  },
 
   // Terminal
   terminal: {
@@ -293,6 +304,10 @@ declare global {
     timeline: { dns: number; tcp: number; ttfb: number; download: number }
     url: string
   }
+  type AIEnvironment = {
+    activeDbConnectionId: string | null
+    activeHttpCollectionId: string | null
+  }
   type AiAgent = 'auto' | 'claude' | 'codex'
   type AiMessageRole = 'user' | 'assistant'
   type AiChatMessage = {
@@ -386,6 +401,11 @@ declare global {
       ) => Promise<boolean>
       readFile: (filePath: string) => Promise<{ content: string; language: string }>
       writeFile: (filePath: string, content: string) => Promise<boolean>
+      onEditorInsertCode: (callback: (payload: { code: string }) => void) => () => void
+      environment: {
+        setDb: (connectionId: string | number | null) => Promise<AIEnvironment>
+        setHttpCollection: (collectionId: string | number | null) => Promise<AIEnvironment>
+      }
       terminal: {
         getShells: () => Promise<{ id: string; label: string }[]>
         getPreferredShell: () => Promise<string>

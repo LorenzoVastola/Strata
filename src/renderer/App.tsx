@@ -1,9 +1,8 @@
-import { Code2, Database, GitBranch, Globe, Sparkles, SquareTerminal } from "lucide-react";
+import { Code2, Database, GitBranch, Globe, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Home from "./components/Home";
 import StatusBar from "./components/StatusBar";
 import AISidebar from "./components/AISidebar";
-import type { Workspace } from "./types/index";
 import DBPanel from "./panels/DBPanel";
 import GitPanel, { type DiffOpenRequest } from "./panels/GitPanel";
 import HttpPanel from "./panels/HttpPanel";
@@ -20,8 +19,6 @@ export default function App() {
   const [dbConnectionToOpen, setDbConnectionToOpen] = useState<number | null>(null);
   const [newDbConnectionRequestId, setNewDbConnectionRequestId] = useState(0);
   const hasWorkspace = Boolean(workspacePath);
-  const _workspaceTypeCheck: Workspace[] = [];
-  void _workspaceTypeCheck;
 
   const idePanelRef = useRef<IDEPanelHandle>(null);
 
@@ -58,6 +55,13 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    return window.api.onEditorInsertCode(({ code }) => {
+      idePanelRef.current?.insertAtCursor(code);
+      setActivePanel("ide");
+    });
   }, []);
 
   const buildAiContext = useCallback(async () => {

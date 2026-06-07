@@ -497,6 +497,7 @@ export default function HttpPanel() {
     const nextDraft = data.requests.find((request) => request.id === nextActive) ?? null
     setActiveRequestId(nextActive)
     setDraft(nextDraft)
+    if (nextDraft?.collectionId) void window.api.environment.setHttpCollection(nextDraft.collectionId)
     if (nextDraft) setOpenTabs((prev) => prev.length ? prev.map((tab) => tab.id === nextDraft.id ? nextDraft : tab) : [nextDraft])
   }
 

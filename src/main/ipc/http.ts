@@ -30,6 +30,16 @@ type HttpRequestInput = {
   responseCaptures?: ResponseCapture[]
 }
 type EnvironmentInput = { id?: number; name: string; variables: KeyValue[] }
+type HttpResponseResult = {
+  status: number
+  statusText: string
+  duration: number
+  size: number
+  body: string
+  headers: Record<string, string>
+  timeline: { dns: number; tcp: number; ttfb: number; download: number }
+  url: string
+}
 
 const now = () => new Date().toISOString()
 const parseJson = <T>(value: string | null | undefined, fallback: T): T => {
@@ -117,6 +127,105 @@ const getEnvironmentVariables = (environmentId?: number | null) => {
       .forEach((item) => variables.set(item.key, item.value))
   })
   return variables
+}
+
+export function getHttpRequest(id: number): HttpRequestInput {
+  const row = getDb().prepare('SELECT * FROM http_requests WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  if (!row) throw new Error('Request not found.')
+  return requestFromRow(row)
+}
+
+export function saveHttpRequest(input: HttpRequestInput): number {
+  const payload = [
+    input.collectionId,
+    input.folderId ?? null,
+    input.name.trim() || 'New Request',
+    input.method,
+    input.url,
+    JSON.stringify(input.params ?? []),
+    JSON.stringify(input.headers ?? []),
+    JSON.stringify(input.body ?? { type: 'none' }),
+    JSON.stringify(input.auth ?? { type: 'none' }),
+    Math.max(1000, Number(input.timeoutMs) || 30000),
+    input.environmentId ?? null,
+    input.description ?? '',
+    JSON.stringify(input.scripts ?? {}),
+    JSON.stringify(input.responseCaptures ?? []),
+    now(),
+  ]
+
+  if (input.id) {
+    getDb().prepare(`
+      UPDATE http_requests
+      SET collection_id = ?, folder_id = ?, name = ?, method = ?, url = ?, params = ?, headers = ?, body = ?, auth = ?, timeout_ms = ?, environment_id = ?, description = ?, scripts = ?, response_captures = ?, updated_at = ?
+      WHERE id = ?
+    `).run(...payload, input.id)
+    return input.id
+  }
+
+  const result = getDb().prepare(`
+    INSERT INTO http_requests (collection_id, folder_id, name, method, url, params, headers, body, auth, timeout_ms, environment_id, description, scripts, response_captures, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(...payload)
+  return Number(result.lastInsertRowid)
+}
+
+export async function sendHttpRequest(input: HttpRequestInput): Promise<HttpResponseResult> {
+  const startedAt = performance.now()
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(input.timeoutMs) || 30000))
+  const variables = getEnvironmentVariables(input.environmentId)
+  runScript(input.scripts?.preRequest, input, variables)
+  const { url, headers, body } = buildRequest(input, variables)
+  const requestHeaders = Object.fromEntries(headers)
+
+  try {
+    const response = await fetch(url, {
+      method: input.method,
+      headers: requestHeaders,
+      body,
+      signal: controller.signal,
+    })
+    const text = await response.text()
+    const duration = performance.now() - startedAt
+    const responseHeaders = Object.fromEntries(response.headers.entries())
+    const result = {
+      status: response.status,
+      statusText: response.statusText,
+      duration,
+      size: bodySize(text),
+      body: text,
+      headers: responseHeaders,
+      timeline: {
+        dns: 0,
+        tcp: 0,
+        ttfb: Math.round(duration * 0.7),
+        download: Math.max(0, Math.round(duration * 0.3)),
+      },
+      url: url.toString(),
+    }
+
+    try {
+      input.responseCaptures?.filter((capture) => capture.enabled && capture.variable && capture.jsonPath).forEach((capture) => {
+        const value = jsonPathValue(text, capture.jsonPath)
+        if (value !== undefined) {
+          const nextValue = typeof value === 'string' ? value : JSON.stringify(value)
+          variables.set(capture.variable, nextValue)
+          updateEnvironmentVariable(input.environmentId, capture.variable, nextValue)
+        }
+      })
+    } catch (error) {
+      console.warn('http response capture skipped:', error)
+    }
+    runScript(input.scripts?.postResponse, input, variables, { status: response.status, body: text })
+
+    getDb().prepare('INSERT INTO http_history (collection_id, request, response, executed_at) VALUES (?, ?, ?, ?)')
+      .run(input.collectionId, JSON.stringify({ ...input, resolvedUrl: url.toString() }), JSON.stringify(result), now())
+    getDb().prepare('DELETE FROM http_history WHERE id NOT IN (SELECT id FROM http_history ORDER BY executed_at DESC LIMIT 100)').run()
+    return result
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 const runScript = (script: string | undefined, input: HttpRequestInput, variables: Map<string, string>, response?: { status: number; body: string }) => {
@@ -325,38 +434,7 @@ export function registerHttpIpc(): void {
   })
 
   ipcMain.handle('http:saveRequest', (_event, input: HttpRequestInput) => {
-    const payload = [
-      input.collectionId,
-      input.folderId ?? null,
-      input.name.trim() || 'New Request',
-      input.method,
-      input.url,
-      JSON.stringify(input.params ?? []),
-      JSON.stringify(input.headers ?? []),
-      JSON.stringify(input.body ?? { type: 'none' }),
-      JSON.stringify(input.auth ?? { type: 'none' }),
-      Math.max(1000, Number(input.timeoutMs) || 30000),
-      input.environmentId ?? null,
-      input.description ?? '',
-      JSON.stringify(input.scripts ?? {}),
-      JSON.stringify(input.responseCaptures ?? []),
-      now(),
-    ]
-
-    if (input.id) {
-      getDb().prepare(`
-        UPDATE http_requests
-        SET collection_id = ?, folder_id = ?, name = ?, method = ?, url = ?, params = ?, headers = ?, body = ?, auth = ?, timeout_ms = ?, environment_id = ?, description = ?, scripts = ?, response_captures = ?, updated_at = ?
-        WHERE id = ?
-      `).run(...payload, input.id)
-      return input.id
-    }
-
-    const result = getDb().prepare(`
-      INSERT INTO http_requests (collection_id, folder_id, name, method, url, params, headers, body, auth, timeout_ms, environment_id, description, scripts, response_captures, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(...payload)
-    return Number(result.lastInsertRowid)
+    return saveHttpRequest(input)
   })
 
   ipcMain.handle('http:deleteRequest', (_event, id: number) => {
@@ -454,61 +532,5 @@ export function registerHttpIpc(): void {
     return true
   })
 
-  ipcMain.handle('http:send', async (_event, input: HttpRequestInput) => {
-    const startedAt = performance.now()
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(input.timeoutMs) || 30000))
-    const variables = getEnvironmentVariables(input.environmentId)
-    runScript(input.scripts?.preRequest, input, variables)
-    const { url, headers, body } = buildRequest(input, variables)
-    const requestHeaders = Object.fromEntries(headers)
-
-    try {
-      const response = await fetch(url, {
-        method: input.method,
-        headers: requestHeaders,
-        body,
-        signal: controller.signal,
-      })
-      const text = await response.text()
-      const duration = performance.now() - startedAt
-      const responseHeaders = Object.fromEntries(response.headers.entries())
-      const result = {
-        status: response.status,
-        statusText: response.statusText,
-        duration,
-        size: bodySize(text),
-        body: text,
-        headers: responseHeaders,
-        timeline: {
-          dns: 0,
-          tcp: 0,
-          ttfb: Math.round(duration * 0.7),
-          download: Math.max(0, Math.round(duration * 0.3)),
-        },
-        url: url.toString(),
-      }
-
-      try {
-        input.responseCaptures?.filter((capture) => capture.enabled && capture.variable && capture.jsonPath).forEach((capture) => {
-          const value = jsonPathValue(text, capture.jsonPath)
-          if (value !== undefined) {
-            const nextValue = typeof value === 'string' ? value : JSON.stringify(value)
-            variables.set(capture.variable, nextValue)
-            updateEnvironmentVariable(input.environmentId, capture.variable, nextValue)
-          }
-        })
-      } catch (error) {
-        console.warn('http response capture skipped:', error)
-      }
-      runScript(input.scripts?.postResponse, input, variables, { status: response.status, body: text })
-
-      getDb().prepare('INSERT INTO http_history (collection_id, request, response, executed_at) VALUES (?, ?, ?, ?)')
-        .run(input.collectionId, JSON.stringify({ ...input, resolvedUrl: url.toString() }), JSON.stringify(result), now())
-      getDb().prepare('DELETE FROM http_history WHERE id NOT IN (SELECT id FROM http_history ORDER BY executed_at DESC LIMIT 100)').run()
-      return result
-    } finally {
-      clearTimeout(timeout)
-    }
-  })
+  ipcMain.handle('http:send', async (_event, input: HttpRequestInput) => sendHttpRequest(input))
 }
