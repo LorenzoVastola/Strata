@@ -74,41 +74,6 @@ const normalizeConnection = (input: DbConnectionInput) => ({
   database: input.database.trim(),
 })
 
-const logConnectionInput = (input: DbConnectionInput) => ({
-  driver: input.driver,
-  name: input.name,
-  host: input.host,
-  port: Number(input.port),
-  user: input.user,
-  database: input.database,
-  hasPassword: Boolean(input.password),
-})
-
-const logSavedConnection = (connection: SavedConnection | undefined) => connection
-  ? {
-      id: connection.id,
-      driver: connection.driver,
-      name: connection.name,
-      host: connection.host,
-      port: connection.port,
-      user: connection.user,
-      database: connection.database,
-      hasEncryptedPassword: Boolean(connection.encrypted_password),
-    }
-  : undefined
-
-const logPoolState = (label: string, connectionId: number) => {
-  const poolEntry = pools.get(connectionId)
-  console.log(label, {
-    receivedId: connectionId,
-    receivedIdType: typeof connectionId,
-    'connections keys:': [...pools.keys()],
-    poolEntryIsUndefined: poolEntry === undefined,
-    poolIsUndefined: poolEntry?.pool === undefined,
-    status: connectionStates.get(connectionId),
-  })
-}
-
 const getSavedConnection = (connectionId: number) => {
   return getDb().prepare(`
     SELECT
@@ -172,9 +137,7 @@ const testPool = async (entry: DbPool) => {
 }
 
 const reconnect = async (connectionId: number) => {
-  logPoolState('[db:reconnect] before reconnect', connectionId)
   const connection = getSavedConnection(connectionId)
-  console.log('[db:reconnect] sqlite row', logSavedConnection(connection))
   if (!connection) {
     setConnectionState(connectionId, 'error', 'Connessione non trovata.')
     throw new Error('Connessione non trovata.')
@@ -194,13 +157,6 @@ const reconnect = async (connectionId: number) => {
     pools.set(connectionId, entry)
     setConnectionState(connectionId, 'connected')
     touchConnection(connectionId)
-    console.log('[db:reconnect] inserted in Map', {
-      insertedId: connectionId,
-      insertedIdType: typeof connectionId,
-      'connections keys:': [...pools.keys()],
-      poolEntryIsUndefined: pools.get(connectionId) === undefined,
-      poolIsUndefined: pools.get(connectionId)?.pool === undefined,
-    })
     return entry
   } catch (err) {
     if (pool) await pool.end().catch(() => undefined)
@@ -211,13 +167,8 @@ const reconnect = async (connectionId: number) => {
 }
 
 const ensurePool = async (connectionId: number) => {
-  logPoolState('[db:ensurePool] start', connectionId)
   const existing = pools.get(connectionId)
   if (existing?.pool) {
-    console.log('[db:ensurePool] using existing pool', {
-      connectionId,
-      'connections keys:': [...pools.keys()],
-    })
     return existing
   }
   if (existing && !existing.pool) pools.delete(connectionId)
@@ -259,12 +210,7 @@ const testConnection = async (input: DbConnectionInput) => {
 }
 
 const queryPool = async (target: QueryPoolTarget, query: string, params: unknown[] = []) => {
-  const targetPool = typeof target === 'object' ? target?.pool : undefined
-  console.log('queryPool received:', target, 'param.pool:', targetPool)
-
   const entry = typeof target === 'number' ? await ensurePool(target) : target
-  console.log('[queryPool] resolved entry:', entry, 'entry.pool:', entry?.pool)
-
   if (!entry?.pool) throw new Error('Connessione non attiva. Clicca destro -> Connetti.')
   const startedAt = performance.now()
 
@@ -307,10 +253,6 @@ const getMysqlSchema = async (connectionId: number) => {
   if (!databaseName) throw new Error('Database MySQL non impostato per la connessione.')
   const schemaPool = await ensurePool(connectionId)
 
-  console.log('[db:getSchema:mysql] loading schema', { connectionId, databaseName })
-  console.log('[db:getSchema:mysql] connections.get(id):', pools.get(connectionId), 'pool:', pools.get(connectionId)?.pool)
-  console.log('queryPool arg:', schemaPool, 'arg.pool:', schemaPool?.pool)
-
   const tablesResult = await queryPool(schemaPool, `
     SELECT TABLE_NAME
     FROM information_schema.TABLES
@@ -318,26 +260,14 @@ const getMysqlSchema = async (connectionId: number) => {
     ORDER BY TABLE_NAME
   `, [databaseName])
   const tableNames = tablesResult.rows.map((row) => String(row.TABLE_NAME))
-  console.log('[db:getSchema:mysql] information_schema.TABLES result', {
-    databaseName,
-    rowCount: tablesResult.rowCount,
-    rows: tablesResult.rows,
-  })
 
   const columnsByTable = await Promise.all(tableNames.map(async (tableName) => {
-    console.log('queryPool arg:', schemaPool, 'arg.pool:', schemaPool?.pool)
     const columnsResult = await queryPool(schemaPool, `
       SELECT COLUMN_NAME, DATA_TYPE, COLUMN_KEY, IS_NULLABLE, COLUMN_DEFAULT, EXTRA
       FROM information_schema.COLUMNS
       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
       ORDER BY ORDINAL_POSITION
     `, [databaseName, tableName])
-    console.log('[db:getSchema:mysql] information_schema.COLUMNS result', {
-      databaseName,
-      tableName,
-      rowCount: columnsResult.rowCount,
-      rows: columnsResult.rows,
-    })
     return {
       tableName,
       columns: columnsResult.rows.map((row) => ({
@@ -354,13 +284,13 @@ const getMysqlSchema = async (connectionId: number) => {
   }))
 
   const [indexes, foreignKeys] = await Promise.all([
-    (console.log('queryPool arg:', schemaPool, 'arg.pool:', schemaPool?.pool), queryPool(schemaPool, `
+    queryPool(schemaPool, `
       SELECT table_schema AS databaseName, table_name AS tableName, index_name AS name, column_name AS columnName, non_unique AS nonUnique
       FROM information_schema.statistics
       WHERE table_schema = ?
       ORDER BY table_schema, table_name, index_name, seq_in_index
-    `, [databaseName])),
-    (console.log('queryPool arg:', schemaPool, 'arg.pool:', schemaPool?.pool), queryPool(schemaPool, `
+    `, [databaseName]),
+    queryPool(schemaPool, `
       SELECT
         constraint_schema AS databaseName,
         table_name AS tableName,
@@ -371,18 +301,10 @@ const getMysqlSchema = async (connectionId: number) => {
       FROM information_schema.key_column_usage
       WHERE referenced_table_name IS NOT NULL AND constraint_schema = ?
       ORDER BY constraint_schema, table_name, constraint_name
-    `, [databaseName])),
+    `, [databaseName]),
   ])
   const tables = tableNames.map((tableName) => ({ databaseName, name: tableName }))
   const columns = columnsByTable.flatMap((entry) => entry.columns)
-
-  console.log('[db:getSchema:mysql] normalized schema result', {
-    databaseName,
-    tables: tables.length,
-    columns: columns.length,
-    indexes: indexes.rowCount,
-    foreignKeys: foreignKeys.rowCount,
-  })
 
   return buildSchemaTree([{ name: databaseName }], tables, columns, indexes.rows, foreignKeys.rows)
 }
@@ -439,6 +361,16 @@ const getPostgresSchema = async (connectionId: number) => {
   return buildSchemaTree(schemas.rows, tables.rows, columns.rows, indexes.rows, foreignKeys.rows)
 }
 
+export async function getDatabaseSchema(connectionId: number) {
+  const connection = getSavedConnection(connectionId)
+  if (!connection) throw new Error('Connessione non trovata.')
+  return connection.driver === 'mysql' ? getMysqlSchema(connectionId) : getPostgresSchema(connectionId)
+}
+
+export async function executeDatabaseQuery(connectionId: number, query: string, params: unknown[] = []) {
+  return queryPool(connectionId, query, params)
+}
+
 const buildSchemaTree = (
   databases: Record<string, unknown>[],
   tables: Record<string, unknown>[],
@@ -486,7 +418,6 @@ export function registerDatabaseIpc(): void {
 
   ipcMain.handle('db:saveConnection', (_event, input: DbConnectionInput) => {
     const connection = normalizeConnection(input)
-    console.log('[db:saveConnection] input to save', logConnectionInput(connection))
     const result = getDb().prepare(`
       INSERT INTO db_connections (name, type, host, port, database, user, encrypted_password)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -503,21 +434,10 @@ export function registerDatabaseIpc(): void {
     const connectionId = Number(result.lastInsertRowid)
     touchConnection(connectionId)
     setConnectionState(connectionId, 'disconnected')
-    console.log('[db:saveConnection] saved sqlite row', logSavedConnection(getSavedConnection(connectionId)))
-    console.log('[db:saveConnection] pools after save', {
-      savedId: connectionId,
-      'connections keys:': [...pools.keys()],
-      poolEntryIsUndefined: pools.get(connectionId) === undefined,
-    })
     return connectionId
   })
 
   ipcMain.handle('db:updateConnection', (_event, connectionId: number, input: DbConnectionInput) => {
-    console.log('[db:updateConnection] input', {
-      connectionId,
-      input: logConnectionInput(input),
-      before: logSavedConnection(getSavedConnection(connectionId)),
-    })
     const previous = getSavedConnection(connectionId)
     if (!previous) throw new Error('Connessione non trovata.')
 
@@ -547,63 +467,30 @@ export function registerDatabaseIpc(): void {
       pools.delete(connectionId)
     }
     setConnectionState(connectionId, 'disconnected')
-    console.log('[db:updateConnection] updated sqlite row', logSavedConnection(getSavedConnection(connectionId)))
-
     return true
   })
 
   ipcMain.handle('db:testConnection', async (_event, input: DbConnectionInput) => {
-    console.log('[db:testConnection] input received; this handler does not save to SQLite', logConnectionInput(input))
     try {
       await testConnection(input)
-      console.log('[db:testConnection] success', logConnectionInput(input))
       return { success: true }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.log('[db:testConnection] failed', {
-        input: logConnectionInput(input),
-        error: message,
-      })
       return { success: false, error: message }
     }
   })
 
   ipcMain.handle('db:connect', async (_event, connectionId: number) => {
-    console.log('[db:connect] received id', {
-      connectionId,
-      connectionIdType: typeof connectionId,
-      beforeKeys: [...pools.keys()],
-      beforeGetIsUndefined: pools.get(connectionId) === undefined,
-      sqliteRow: logSavedConnection(getSavedConnection(connectionId)),
-    })
     await reconnect(connectionId)
-    console.log('[db:connect] inserted id in Map after connect', {
-      insertedId: connectionId,
-      insertedIdType: typeof connectionId,
-      'connections keys:': [...pools.keys()],
-      afterGetIsUndefined: pools.get(connectionId) === undefined,
-      afterPoolIsUndefined: pools.get(connectionId)?.pool === undefined,
-    })
     return true
   })
 
   ipcMain.handle('db:getSchema', async (_event, connectionId: number) => {
-    console.log('[db:getSchema] received id before anything', {
-      connectionId,
-      connectionIdType: typeof connectionId,
-    })
-    console.log('connections keys:', [...pools.keys()])
-    console.log('[db:getSchema] connections.get(id) is undefined:', pools.get(connectionId) === undefined)
-    console.log('[db:getSchema] pool is undefined:', pools.get(connectionId)?.pool === undefined)
-    console.log('[db:getSchema] sqlite row for id:', logSavedConnection(getSavedConnection(connectionId)))
-    const connection = getSavedConnection(connectionId)
-    if (!connection) throw new Error('Connessione non trovata.')
-    return connection.driver === 'mysql' ? getMysqlSchema(connectionId) : getPostgresSchema(connectionId)
+    return getDatabaseSchema(connectionId)
   })
 
   ipcMain.handle('db:query', async (_event, connectionId: number, query: string, params: unknown[] = []) => {
-    logPoolState('[db:query] before queryPool', connectionId)
-    return queryPool(connectionId, query, params)
+    return executeDatabaseQuery(connectionId, query, params)
   })
 
   ipcMain.handle('db:browseTable', async (
@@ -614,15 +501,12 @@ export function registerDatabaseIpc(): void {
     page: number,
     pageSize: number,
   ) => {
-    logPoolState('[db:browseTable] before queryPool', connectionId)
     const connection = getSavedConnection(connectionId)
     if (!connection) throw new Error('Connessione non trovata.')
 
     const limit = Math.max(1, Math.min(500, pageSize))
     const offset = Math.max(0, page - 1) * limit
-    const tableRef = connection.driver === 'mysql'
-      ? `${quoteIdentifier(connection.driver, databaseName)}.${quoteIdentifier(connection.driver, tableName)}`
-      : `${quoteIdentifier(connection.driver, databaseName)}.${quoteIdentifier(connection.driver, tableName)}`
+    const tableRef = `${quoteIdentifier(connection.driver, databaseName)}.${quoteIdentifier(connection.driver, tableName)}`
 
     const dataQuery = connection.driver === 'mysql'
       ? `SELECT * FROM ${tableRef} LIMIT ${limit} OFFSET ${offset}`
@@ -638,7 +522,6 @@ export function registerDatabaseIpc(): void {
   })
 
   ipcMain.handle('db:disconnect', async (_event, connectionId: number) => {
-    logPoolState('[db:disconnect] before disconnect', connectionId)
     const entry = pools.get(connectionId)
     if (!entry) {
       setConnectionState(connectionId, 'disconnected')
@@ -648,16 +531,10 @@ export function registerDatabaseIpc(): void {
     await entry.pool.end()
     pools.delete(connectionId)
     setConnectionState(connectionId, 'disconnected')
-    console.log('[db:disconnect] after disconnect', {
-      connectionId,
-      'connections keys:': [...pools.keys()],
-      poolEntryIsUndefined: pools.get(connectionId) === undefined,
-    })
     return true
   })
 
   ipcMain.handle('db:deleteConnection', async (_event, connectionId: number) => {
-    logPoolState('[db:deleteConnection] before delete', connectionId)
     const entry = pools.get(connectionId)
     if (entry) {
       await entry.pool.end()

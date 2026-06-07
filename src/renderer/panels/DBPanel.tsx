@@ -482,6 +482,7 @@ export default function DBPanel({ initialConnectionId = null, newConnectionReque
         connectionIdType: typeof connectionId,
       })
       await window.api.database.connect(connectionId)
+      await window.api.environment.setDb(connectionId)
       console.log('[DBPanel] db:getSchema request', {
         connectionId,
         connectionIdType: typeof connectionId,
@@ -749,6 +750,7 @@ export default function DBPanel({ initialConnectionId = null, newConnectionReque
     setTabs((prev) => prev.map((item) => item.id === tabId ? { ...item, loading: true, error: null } : item))
     try {
       const result = await window.api.database.query(tab.connectionId, tab.sql)
+      await window.api.environment.setDb(tab.connectionId)
       setConnectionStatus(tab.connectionId, 'connected')
       setTabs((prev) =>
         prev.map((item) => item.id === tabId && item.kind === 'query' ? { ...item, result, loading: false } : item),

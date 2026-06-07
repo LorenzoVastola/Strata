@@ -3,6 +3,7 @@ import { execSync, spawn, spawnSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { getDb } from '../storage/db'
+import { ensureMcpConfigFiles } from '../mcp/config'
 
 const PROVIDERS = ['claude', 'codex'] as const
 type Provider = typeof PROVIDERS[number]
@@ -32,6 +33,13 @@ type AiSessionRow = {
 const activeProcesses = new Map<string, AiProcess>()
 const activeWatchers = new Map<string, fs.FSWatcher>()
 const explicitlyStoppedSessions = new Set<string>()
+const CLAUDE_ALLOWED_STRATA_TOOLS = [
+  'mcp__strata__strata_db_schema',
+  'mcp__strata__strata_db_query',
+  'mcp__strata__strata_http_save_request',
+  'mcp__strata__strata_http_send',
+  'mcp__strata__strata_editor_insert'
+]
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 const now = () => new Date().toISOString()
@@ -59,8 +67,25 @@ function normalizeAgent(mode: AgentMode | string): Provider {
 }
 
 function getStatelessInvocation(agent: Provider): { args: string[]; useStdin: boolean } {
-  if (agent === 'claude') return { args: ['--print'], useStdin: true }
-  return { args: ['exec', '-'], useStdin: true }
+  const mcpConfig = ensureMcpConfigFiles()
+  if (agent === 'claude') {
+    return {
+      args: [
+        '--mcp-config',
+        mcpConfig.claude,
+        '--strict-mcp-config',
+        '--allowedTools',
+        CLAUDE_ALLOWED_STRATA_TOOLS.join(','),
+        '--print'
+      ],
+      useStdin: true
+    }
+  }
+  // TODO: Codex exec does not expose a clean MCP tool allowlist flag in the local help output.
+  return {
+    args: ['-c', `mcp_servers.strata.url="${mcpConfig.url}"`, 'exec', '-'],
+    useStdin: true
+  }
 }
 
 function titleFromMessage(message: string): string {

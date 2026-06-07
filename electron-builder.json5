@@ -1,26 +1,31 @@
 // @see - https://www.electron.build/configuration/configuration
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "YourAppID",
+  "appId": "com.strata.ide",
+  "productName": "Strata",
   "asar": true,
   "asarUnpack": [
-    "node_modules/node-pty/**/*"
+    "node_modules/node-pty/**/*",
+    "node_modules/better-sqlite3/**/*",
+    "node_modules/keytar/**/*"
   ],
-  "productName": "YourAppName",
   "directories": {
     "output": "release/${version}"
   },
   "files": [
     "dist",
-    "dist-electron"
+    "dist-electron",
+    "package.json"
   ],
   "mac": {
+    "icon": "build/icons/mac/icon.icns",
     "target": [
       "dmg"
     ],
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
+    "icon": "build/icons/win/icon.ico",
     "target": [
       {
         "target": "nsis",
@@ -38,6 +43,7 @@
     "deleteAppDataOnUninstall": false
   },
   "linux": {
+    "icon": "build/icons/png",
     "target": [
       "AppImage"
     ],
