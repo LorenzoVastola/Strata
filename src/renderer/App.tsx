@@ -1,6 +1,7 @@
 import { Code2, Database, GitBranch, Globe, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Home from "./components/Home";
+import MenuBar from "./components/MenuBar";
 import StatusBar from "./components/StatusBar";
 import AISidebar from "./components/AISidebar";
 import DBPanel from "./panels/DBPanel";
@@ -26,7 +27,7 @@ export default function App() {
     idePanelRef.current?.openDiffTab(req);
   }, []);
 
-  const handleOpenWorkspace = (path: string, _name: string) => {
+  const handleOpenWorkspace = (path: string) => {
     setWorkspacePath(path);
     setActivePanel("ide");
   };
@@ -127,6 +128,14 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden">
+      <MenuBar
+        workspacePath={workspacePath}
+        activePanel={activePanel}
+        onSelectPanel={selectPanel}
+        onOpenWorkspace={handleOpenWorkspace}
+        aiOpen={aiOpen}
+        onToggleAI={() => setAiOpen((open) => !open)}
+      />
       <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
         {/* ── Activity bar ── */}
         <aside className="flex h-full w-12 shrink-0 flex-col items-center gap-2 bg-zinc-900 py-3" style={{ background: 'var(--strata-sidebar)', borderRight: '1px solid var(--strata-border)' }}>
