@@ -11,6 +11,7 @@ const environment: AIEnvironment = {
 }
 
 let mainWebContents: WebContents | null = null
+let activeWorkspaceRoot: string | null = null
 
 export function setMainWebContents(webContents: WebContents): void {
   mainWebContents = webContents
@@ -18,6 +19,15 @@ export function setMainWebContents(webContents: WebContents): void {
 
 export function getMainWebContents(): WebContents | null {
   return mainWebContents && !mainWebContents.isDestroyed() ? mainWebContents : null
+}
+
+export function getActiveWorkspaceRoot(): string | null {
+  return activeWorkspaceRoot
+}
+
+export function setActiveWorkspaceRoot(workspaceRoot: string | null): string | null {
+  activeWorkspaceRoot = workspaceRoot
+  return activeWorkspaceRoot
 }
 
 export function getAIEnvironment(): AIEnvironment {
@@ -37,4 +47,5 @@ export function setActiveHttpCollectionId(collectionId: string | number | null):
 export function registerEnvironmentIpc(): void {
   ipcMain.handle('env:setDb', (_event, connectionId: string | number | null) => setActiveDbConnectionId(connectionId))
   ipcMain.handle('env:setHttpCollection', (_event, collectionId: string | number | null) => setActiveHttpCollectionId(collectionId))
+  ipcMain.handle('env:setWorkspaceRoot', (_event, workspaceRoot: string | null) => setActiveWorkspaceRoot(workspaceRoot))
 }

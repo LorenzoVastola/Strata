@@ -15,6 +15,15 @@ import { startMcpServer, stopMcpServer } from './mcp/server'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+function logRenderProcessGone(source: string, details: Electron.RenderProcessGoneDetails): void {
+  console.error('[render-process-gone]', {
+    source,
+    reason: details.reason,
+    exitCode: details.exitCode,
+    details,
+  })
+}
+
 function createWindow(): BrowserWindow {
   const iconPath = app.isPackaged
     ? process.platform === 'darwin'
@@ -38,6 +47,9 @@ function createWindow(): BrowserWindow {
     }
   })
   Menu.setApplicationMenu(null)
+  win.webContents.on('render-process-gone', (_event, details) => {
+    logRenderProcessGone('main-window.webContents', details)
+  })
   win.webContents.on('before-input-event', (event, input) => {
     if (!input.control || !input.shift || input.key.toLowerCase() !== 'i') return
 
@@ -68,6 +80,10 @@ app.whenReady().then(() => {
   registerAiIpc(win.webContents)
   void startMcpServer().catch((error) => console.error('[MCP] failed to start', error))
   registerTerminalIpc(win)
+})
+
+app.on('render-process-gone', (_event, webContents, details) => {
+  logRenderProcessGone(`app:webContents:${webContents.id}`, details)
 })
 
 app.on('window-all-closed', () => {

@@ -5,7 +5,7 @@ import { getDb } from '../storage/db'
 
 type KeyValue = { id?: string; key: string; value: string; enabled: boolean; description?: string }
 type BodyConfig = { type: 'none' | 'raw' | 'form-data' | 'x-www-form-urlencoded'; rawType?: string; raw?: string; fields?: KeyValue[] }
-type ScriptConfig = { preRequest?: string; postResponse?: string }
+type ScriptConfig = { preRequest?: string; postResponse?: string; sanitizeHistory?: boolean }
 type ResponseCapture = { id?: string; jsonPath: string; variable: string; enabled: boolean }
 type AuthConfig =
   | { type: 'none' }
@@ -28,6 +28,7 @@ type HttpRequestInput = {
   description?: string
   scripts?: ScriptConfig
   responseCaptures?: ResponseCapture[]
+  sanitizeHistory?: boolean
 }
 type EnvironmentInput = { id?: number; name: string; variables: KeyValue[] }
 type HttpResponseResult = {
@@ -51,24 +52,33 @@ const parseJson = <T>(value: string | null | undefined, fallback: T): T => {
   }
 }
 
-const requestFromRow = (row: Record<string, unknown>) => ({
-  id: Number(row.id),
-  collectionId: Number(row.collection_id),
-  folderId: row.folder_id === null || row.folder_id === undefined ? null : Number(row.folder_id),
-  name: String(row.name),
-  method: String(row.method),
-  url: String(row.url),
-  params: parseJson<KeyValue[]>(String(row.params ?? '[]'), []),
-  headers: parseJson<KeyValue[]>(String(row.headers ?? '[]'), []),
-  body: parseJson<BodyConfig>(String(row.body ?? '{}'), { type: 'none' }),
-  auth: parseJson<AuthConfig>(String(row.auth ?? '{}'), { type: 'none' }),
-  timeoutMs: Number(row.timeout_ms ?? 30000),
-  environmentId: row.environment_id === null || row.environment_id === undefined ? null : Number(row.environment_id),
-  description: String(row.description ?? ''),
-  scripts: parseJson<ScriptConfig>(String(row.scripts ?? '{}'), {}),
-  responseCaptures: parseJson<ResponseCapture[]>(String(row.response_captures ?? '[]'), []),
-  updatedAt: String(row.updated_at),
+const requestScriptsPayload = (request: HttpRequestInput) => JSON.stringify({
+  ...(request.scripts ?? {}),
+  sanitizeHistory: Boolean(request.sanitizeHistory),
 })
+
+const requestFromRow = (row: Record<string, unknown>) => {
+  const scripts = parseJson<ScriptConfig>(String(row.scripts ?? '{}'), {})
+  return {
+    id: Number(row.id),
+    collectionId: Number(row.collection_id),
+    folderId: row.folder_id === null || row.folder_id === undefined ? null : Number(row.folder_id),
+    name: String(row.name),
+    method: String(row.method),
+    url: String(row.url),
+    params: parseJson<KeyValue[]>(String(row.params ?? '[]'), []),
+    headers: parseJson<KeyValue[]>(String(row.headers ?? '[]'), []),
+    body: parseJson<BodyConfig>(String(row.body ?? '{}'), { type: 'none' }),
+    auth: parseJson<AuthConfig>(String(row.auth ?? '{}'), { type: 'none' }),
+    timeoutMs: Number(row.timeout_ms ?? 30000),
+    environmentId: row.environment_id === null || row.environment_id === undefined ? null : Number(row.environment_id),
+    description: String(row.description ?? ''),
+    scripts,
+    responseCaptures: parseJson<ResponseCapture[]>(String(row.response_captures ?? '[]'), []),
+    sanitizeHistory: Boolean(scripts.sanitizeHistory),
+    updatedAt: String(row.updated_at),
+  }
+}
 
 const environmentFromRow = (row: Record<string, unknown>) => ({
   id: Number(row.id),
@@ -129,6 +139,60 @@ const getEnvironmentVariables = (environmentId?: number | null) => {
   return variables
 }
 
+const getGlobalHistoryRedaction = () => {
+  const row = getDb().prepare("SELECT value FROM app_settings WHERE key = 'httpHistory.redactBodies'").get() as { value?: string } | undefined
+  return row?.value === 'true'
+}
+
+const sensitiveHistoryHeaders = new Set(['authorization', 'cookie', 'set-cookie'])
+const redacted = '[redacted]'
+
+const redactKeyValueHeaders = (headers: KeyValue[] = []) => headers.map((header) => (
+  sensitiveHistoryHeaders.has(header.key.toLowerCase())
+    ? { ...header, value: redacted }
+    : header
+))
+
+const redactHeaderRecord = (headers: Record<string, string>) => Object.fromEntries(
+  Object.entries(headers).map(([key, value]) => [
+    key,
+    sensitiveHistoryHeaders.has(key.toLowerCase()) ? redacted : value,
+  ]),
+)
+
+const redactBody = (body: BodyConfig): BodyConfig => {
+  if (body.type === 'none') return body
+  if (body.type === 'raw') return { ...body, raw: redacted }
+  return {
+    ...body,
+    fields: body.fields?.map((field) => ({ ...field, value: redacted })),
+  }
+}
+
+const redactAuth = (auth: AuthConfig): AuthConfig => {
+  if (auth.type === 'bearer') return { ...auth, token: redacted }
+  if (auth.type === 'basic') return { ...auth, password: redacted }
+  if (auth.type === 'apiKey') return { ...auth, value: redacted }
+  return auth
+}
+
+const redactHistoryPayload = (
+  request: HttpRequestInput & { resolvedUrl: string },
+  response: HttpResponseResult,
+) => ({
+  request: {
+    ...request,
+    headers: redactKeyValueHeaders(request.headers),
+    body: redactBody(request.body),
+    auth: redactAuth(request.auth),
+  },
+  response: {
+    ...response,
+    body: redacted,
+    headers: redactHeaderRecord(response.headers),
+  },
+})
+
 export function getHttpRequest(id: number): HttpRequestInput {
   const row = getDb().prepare('SELECT * FROM http_requests WHERE id = ?').get(id) as Record<string, unknown> | undefined
   if (!row) throw new Error('Request not found.')
@@ -149,7 +213,7 @@ export function saveHttpRequest(input: HttpRequestInput): number {
     Math.max(1000, Number(input.timeoutMs) || 30000),
     input.environmentId ?? null,
     input.description ?? '',
-    JSON.stringify(input.scripts ?? {}),
+    requestScriptsPayload(input),
     JSON.stringify(input.responseCaptures ?? []),
     now(),
   ]
@@ -219,8 +283,13 @@ export async function sendHttpRequest(input: HttpRequestInput): Promise<HttpResp
     }
     runScript(input.scripts?.postResponse, input, variables, { status: response.status, body: text })
 
+    const historyRequest = { ...input, resolvedUrl: url.toString() }
+    const historyPayload = input.sanitizeHistory || getGlobalHistoryRedaction()
+      ? redactHistoryPayload(historyRequest, result)
+      : { request: historyRequest, response: result }
+
     getDb().prepare('INSERT INTO http_history (collection_id, request, response, executed_at) VALUES (?, ?, ?, ?)')
-      .run(input.collectionId, JSON.stringify({ ...input, resolvedUrl: url.toString() }), JSON.stringify(result), now())
+      .run(input.collectionId, JSON.stringify(historyPayload.request), JSON.stringify(historyPayload.response), now())
     getDb().prepare('DELETE FROM http_history WHERE id NOT IN (SELECT id FROM http_history ORDER BY executed_at DESC LIMIT 100)').run()
     return result
   } finally {
@@ -374,7 +443,7 @@ export function registerHttpIpc(): void {
         request.timeoutMs,
         request.environmentId,
         request.description ?? '',
-        JSON.stringify(request.scripts ?? {}),
+        requestScriptsPayload(request),
         JSON.stringify(request.responseCaptures ?? []),
         now(),
       )
@@ -425,7 +494,7 @@ export function registerHttpIpc(): void {
         request.timeoutMs,
         request.environmentId,
         request.description ?? '',
-        JSON.stringify(request.scripts ?? {}),
+        requestScriptsPayload(request),
         JSON.stringify(request.responseCaptures ?? []),
         now(),
       )
@@ -467,7 +536,7 @@ export function registerHttpIpc(): void {
       request.timeoutMs,
       request.environmentId,
       request.description ?? '',
-      JSON.stringify(request.scripts ?? {}),
+      requestScriptsPayload(request),
       JSON.stringify(request.responseCaptures ?? []),
       now(),
     )
@@ -491,6 +560,16 @@ export function registerHttpIpc(): void {
   ipcMain.handle('http:saveLayout', (_event, layout: { sidebarWidth: number; requestPanePercent: number }) => {
     getDb().prepare('INSERT OR REPLACE INTO http_settings (key, value) VALUES (?, ?)').run('sidebarWidth', String(Math.min(400, Math.max(160, Number(layout.sidebarWidth) || 320))))
     getDb().prepare('INSERT OR REPLACE INTO http_settings (key, value) VALUES (?, ?)').run('requestPanePercent', String(Math.min(85, Math.max(30, Number(layout.requestPanePercent) || 50))))
+    return true
+  })
+
+  ipcMain.handle('http:getHistorySettings', () => ({
+    redactBodies: getGlobalHistoryRedaction(),
+  }))
+
+  ipcMain.handle('http:saveHistorySettings', (_event, settings: { redactBodies: boolean }) => {
+    getDb().prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)')
+      .run('httpHistory.redactBodies', settings.redactBodies ? 'true' : 'false')
     return true
   })
 

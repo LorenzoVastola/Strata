@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Check, Clock3, Copy, Eraser, Loader2, Plus, Send, X } from 'lucide-react'
+import { AlertTriangle, Bot, Check, Clock3, Copy, Eraser, File, Folder, Loader2, Plus, Send, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 
 type TextMessage = { id: string; role: 'user' | 'assistant'; content: string; agent?: 'claude' | 'codex'; createdAt?: string }
@@ -7,6 +7,7 @@ type ChatMessage = TextMessage | PermissionMessage
 type RuntimeSession = AiSessionSummary & { messages: ChatMessage[]; readOnly?: boolean; loading?: boolean; loadingStartedAt?: number; status?: AiSessionStatus }
 type AiContext = Record<string, unknown>
 type WarmStatus = 'warming' | 'ready' | 'failed'
+type ContextAttachment = { path: string; relativePath: string; kind: 'file' | 'folder' }
 
 type Props = {
   open: boolean
@@ -36,11 +37,13 @@ const commandPrompt = (value: string) => {
   return value
 }
 
-const systemPrompt = (context: AiContext) => `You are an AI assistant integrated in Strata, a developer IDE.
+const systemPrompt = (attachments: ContextAttachment[]) => `You are an AI assistant integrated in Strata, a developer IDE.
 You have access to the current context of the developer's workspace.
 Always respond in the same language the user writes in.
 When writing code, use the same language/framework as the active file.
-Current context: ${JSON.stringify(context, null, 2)}`
+${attachments.length > 0
+  ? `The user selected explicit file or folder context with @. That content is included below by the main process.`
+  : 'No explicit file or folder context was selected; use the working directory as repository context.'}`
 
 const relativeTime = (value: string) => {
   const seconds = Math.max(1, Math.floor((Date.now() - new Date(value).getTime()) / 1000))
@@ -65,6 +68,29 @@ const parseBlocks = (content: string) => {
   }
   if (last < content.length) blocks.push({ type: 'text', value: content.slice(last) })
   return blocks
+}
+
+const normalizePath = (value: string) => value.replace(/\\/g, '/')
+
+const relativePathFromWorkspace = (workspacePath: string, targetPath: string) => {
+  const root = normalizePath(workspacePath).replace(/\/$/, '')
+  const target = normalizePath(targetPath)
+  return target.startsWith(`${root}/`) ? target.slice(root.length + 1) : target
+}
+
+const getMentionQuery = (value: string, cursor: number) => {
+  const beforeCursor = value.slice(0, cursor)
+  const match = beforeCursor.match(/(?:^|\s)@([^\s@]*)$/)
+  return match ? match[1] : null
+}
+
+const removeMentionToken = (value: string, cursor: number) => {
+  const beforeCursor = value.slice(0, cursor)
+  const match = beforeCursor.match(/(?:^|\s)@([^\s@]*)$/)
+  if (!match || match.index === undefined) return value
+  const prefix = value.slice(0, match.index)
+  const suffix = value.slice(cursor)
+  return `${prefix}${prefix && suffix ? ' ' : ''}${suffix}`.replace(/\s{2,}/g, ' ')
 }
 
 function AgentMark({ agent }: { agent: 'claude' | 'codex' }) {
@@ -165,9 +191,14 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
   const [agentMode, setAgentMode] = useState<AiAgent>('auto')
   const [input, setInput] = useState('')
   const [badges, setBadges] = useState<string[]>([])
+  const [contextOptions, setContextOptions] = useState<ContextAttachment[]>([])
+  const [selectedContext, setSelectedContext] = useState<ContextAttachment[]>([])
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
   const [warmStatus, setWarmStatus] = useState<Record<'claude' | 'codex', WarmStatus>>({ claude: 'warming', codex: 'warming' })
   const [visibleReadyWarm, setVisibleReadyWarm] = useState<Partial<Record<'claude' | 'codex', boolean>>>({})
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const stickToBottomRef = useRef(true)
   const warmReadyTimers = useRef<Partial<Record<'claude' | 'codex', number>>>({})
 
@@ -206,6 +237,48 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
     void refreshRecent()
     void buildContext().then((context) => setBadges(extractBadges(context)))
   }, [open, buildContext, refreshRecent])
+
+  useEffect(() => {
+    if (!open || !workspacePath) {
+      setContextOptions([])
+      setSelectedContext([])
+      return
+    }
+
+    let cancelled = false
+    const ignoredDirs = new Set(['.git', 'node_modules', 'dist', 'dist-electron', 'release', 'out', '.next', '.vite'])
+
+    const loadOptions = async () => {
+      const options = new Map<string, ContextAttachment>()
+      const visit = async (dirPath: string) => {
+        const entries = await window.api.readDir(dirPath)
+        for (const entry of entries) {
+          const relativePath = relativePathFromWorkspace(workspacePath, entry.path)
+          if (entry.isDirectory) {
+            if (ignoredDirs.has(entry.name)) continue
+            options.set(entry.path, { path: entry.path, relativePath, kind: 'folder' })
+            await visit(entry.path)
+          } else {
+            options.set(entry.path, { path: entry.path, relativePath, kind: 'file' })
+          }
+        }
+      }
+
+      try {
+        await visit(workspacePath)
+        if (!cancelled) {
+          setContextOptions([...options.values()].sort((a, b) => a.relativePath.localeCompare(b.relativePath)))
+        }
+      } catch {
+        if (!cancelled) setContextOptions([])
+      }
+    }
+
+    void loadOptions()
+    return () => {
+      cancelled = true
+    }
+  }, [open, workspacePath])
 
   useEffect(() => {
     const setProviderStatus = (provider: 'claude' | 'codex', status: WarmStatus) => {
@@ -271,8 +344,8 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
       setSessions((prev) => prev.map((session) => session.id === sessionId ? {
         ...session,
         status,
-        loading: status === 'processing' ? true : session.loading,
-        loadingStartedAt: status === 'processing' ? (session.loadingStartedAt ?? Date.now()) : session.loadingStartedAt
+        loading: status === 'processing',
+        loadingStartedAt: status === 'processing' ? (session.loadingStartedAt ?? Date.now()) : undefined
       } : session))
     })
     const offDone = window.api.ai.onDone(({ sessionId }) => {
@@ -319,7 +392,7 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
     const sessionId = activeSessionId ?? createSession()
     if (!sessionId) return
 
-    const context = await buildContext()
+    let explicitContext: ContextAttachment[] = selectedContext
     const userContent = commandPrompt(text)
     const userMessage: TextMessage = { id: uid(), role: 'user', content: text }
     const assistantAgent = activeSession?.agent === 'codex' ? 'codex' : 'claude'
@@ -328,7 +401,7 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
 
     stickToBottomRef.current = true
     setInput('')
-    setBadges(extractBadges(context))
+    setMentionQuery(null)
     setSessions((prev) => prev.map((session) => session.id === sessionId ? {
       ...session,
       title,
@@ -338,15 +411,21 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
       messages: [...session.messages, userMessage, assistantMessage]
     } : session))
 
-    const history = [...textMessages, { ...userMessage, content: userContent }].map(({ role, content }) => ({ role, content }))
-    await window.api.ai.send({
-      sessionId,
-      requestId: sessionId,
-      workspacePath,
-      system: systemPrompt(context),
-      messages: history,
-      agentMode
-    }).catch((error) => {
+    const context = await buildContext()
+    setBadges(extractBadges(context))
+
+    let history: { role: AiMessageRole; content: string }[] = [...textMessages, { ...userMessage, content: userContent }].map(({ role, content }) => ({ role, content }))
+    try {
+      await window.api.ai.send({
+        sessionId,
+        requestId: sessionId,
+        workspacePath,
+        system: systemPrompt(explicitContext),
+        messages: history,
+        agentMode,
+        explicitContext
+      })
+    } catch (error) {
       setSessions((prev) => prev.map((session) => session.id === sessionId ? {
         ...session,
         loading: false,
@@ -354,8 +433,16 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
         status: 'terminated',
         messages: session.messages.map((message) => message.id === sessionId && message.role === 'assistant' ? { ...message, content: `${message.content}\n\n${error instanceof Error ? error.message : String(error)}` } : message)
       } : session))
-    })
-  }, [activeSession, activeSessionId, agentMode, buildContext, createSession, hasActiveRuntimeSession, input, textMessages, warmBlocking, workspacePath])
+    } finally {
+      history = []
+      explicitContext = []
+      setSessions((prev) => prev.map((session) => session.id === sessionId ? {
+        ...session,
+        loading: false,
+        loadingStartedAt: undefined
+      } : session))
+    }
+  }, [activeSession, activeSessionId, agentMode, buildContext, createSession, hasActiveRuntimeSession, input, selectedContext, textMessages, warmBlocking, workspacePath])
 
   const closeSession = async (sessionId: string) => {
     await window.api.ai.killSession(sessionId)
@@ -413,7 +500,57 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
     document.addEventListener('mouseup', onUp)
   }
 
+  const mentionResults = useMemo(() => {
+    if (mentionQuery === null) return []
+    const query = mentionQuery.toLowerCase()
+    return contextOptions
+      .filter((item) => !selectedContext.some((selected) => selected.path === item.path))
+      .filter((item) => item.relativePath.toLowerCase().includes(query))
+      .slice(0, 8)
+  }, [contextOptions, mentionQuery, selectedContext])
+
+  const updateMentionQuery = (value: string, cursor: number) => {
+    setMentionQuery(getMentionQuery(value, cursor))
+    setMentionIndex(0)
+  }
+
+  const selectContextAttachment = (attachment: ContextAttachment) => {
+    setSelectedContext((prev) => prev.some((item) => item.path === attachment.path) ? prev : [...prev, attachment])
+    const textarea = inputRef.current
+    const cursor = textarea?.selectionStart ?? input.length
+    const nextInput = removeMentionToken(input, cursor)
+    setInput(nextInput)
+    setMentionQuery(null)
+    window.requestAnimationFrame(() => textarea?.focus())
+  }
+
+  const removeContextAttachment = (path: string) => {
+    setSelectedContext((prev) => prev.filter((item) => item.path !== path))
+  }
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionQuery !== null && mentionResults.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setMentionIndex((prev) => Math.min(prev + 1, mentionResults.length - 1))
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setMentionIndex((prev) => Math.max(prev - 1, 0))
+        return
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        selectContextAttachment(mentionResults[mentionIndex])
+        return
+      }
+      if (event.key === 'Escape') {
+        setMentionQuery(null)
+        return
+      }
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       void send()
@@ -428,12 +565,20 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
   }
 
   const filesPreview = useMemo(() => activeSession?.files.slice(0, 3) ?? [], [activeSession])
+  console.log('[send-gate]', {
+    noText: !input.trim(),
+    noWorkspace: !workspacePath,
+    loading: activeSession?.loading,
+    readOnly: activeSession?.readOnly,
+    hasActiveRuntimeSession,
+    warmBlocking,
+  })
   const inputDisabled = Boolean(activeSession?.readOnly || activeSession?.loading || (!hasActiveRuntimeSession && warmBlocking))
   const inputPlaceholder = activeSession?.readOnly
     ? 'Sessione recente in sola lettura'
     : !hasActiveRuntimeSession && warmBlocking
       ? 'Attendere inizializzazione...'
-      : '/explain, /fix, /test, /commit, /query, /request'
+      : 'Ask anything...'
 
   if (!open) return null
 
@@ -510,8 +655,21 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
       </div>
 
       <div className="border-t border-zinc-800 p-3" style={{ borderColor: 'var(--strata-border)' }}>
-        {(badges.length > 0 || filesPreview.length > 0) && (
+        {(badges.length > 0 || filesPreview.length > 0 || selectedContext.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-1">
+            {selectedContext.map((item) => (
+              <button
+                key={item.path}
+                type="button"
+                title={item.relativePath}
+                onClick={() => removeContextAttachment(item.path)}
+                className="inline-flex max-w-full items-center gap-1 rounded bg-emerald-950 px-1.5 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-900"
+              >
+                {item.kind === 'folder' ? <Folder className="h-3 w-3 shrink-0" /> : <File className="h-3 w-3 shrink-0" />}
+                <span className="truncate">{item.relativePath}</span>
+                <X className="h-3 w-3 shrink-0" />
+              </button>
+            ))}
             {[...badges, ...filesPreview].slice(0, 5).map((badge) => <span key={badge} className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{badge}</span>)}
           </div>
         )}
@@ -543,10 +701,16 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
             )}
           </div>
         )}
-        <div className="flex gap-2">
+        <div className="relative flex gap-2">
           <textarea
+            ref={inputRef}
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(event) => {
+              setInput(event.target.value)
+              updateMentionQuery(event.target.value, event.target.selectionStart)
+            }}
+            onClick={(event) => updateMentionQuery(event.currentTarget.value, event.currentTarget.selectionStart)}
+            onKeyUp={(event) => updateMentionQuery(event.currentTarget.value, event.currentTarget.selectionStart)}
             onKeyDown={onKeyDown}
             rows={3}
             disabled={inputDisabled}
@@ -556,6 +720,29 @@ export default function AISidebar({ open, width, onWidthChange, onClose, workspa
           <button type="button" onClick={() => void send()} disabled={!input.trim() || inputDisabled} className="self-end rounded bg-emerald-700 p-2 text-white hover:bg-emerald-600 disabled:opacity-40">
             {activeSession?.loading ? <Bot className="h-4 w-4 animate-pulse" /> : <Send className="h-4 w-4" />}
           </button>
+          {mentionQuery !== null && !inputDisabled && (
+            <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-[calc(100%-3rem)] overflow-auto rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-2xl">
+              {mentionResults.length > 0 ? mentionResults.map((item, index) => (
+                <button
+                  key={item.path}
+                  type="button"
+                  title={item.path}
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    selectContextAttachment(item)
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs ${
+                    index === mentionIndex ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                  }`}
+                >
+                  {item.kind === 'folder' ? <Folder className="h-3.5 w-3.5 shrink-0 text-sky-300" /> : <File className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
+                  <span className="min-w-0 flex-1 truncate">{item.relativePath}</span>
+                </button>
+              )) : (
+                <div className="px-3 py-2 text-xs text-zinc-500">No matching files or folders</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </aside>

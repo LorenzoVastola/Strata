@@ -22,6 +22,7 @@ type DbConnectionInput = {
   user: string
   password: string
   database: string
+  readOnly: boolean
 }
 
 type SavedConnection = Omit<DbConnectionInput, 'password'> & {
@@ -72,6 +73,7 @@ const normalizeConnection = (input: DbConnectionInput) => ({
   user: input.user.trim(),
   password: input.password,
   database: input.database.trim(),
+  readOnly: Boolean(input.readOnly),
 })
 
 const getSavedConnection = (connectionId: number) => {
@@ -84,7 +86,8 @@ const getSavedConnection = (connectionId: number) => {
       port,
       user,
       database,
-      encrypted_password
+      encrypted_password,
+      read_only AS readOnly
     FROM db_connections
     WHERE id = ?
   `).get(connectionId) as SavedConnection | undefined
@@ -371,6 +374,11 @@ export async function executeDatabaseQuery(connectionId: number, query: string, 
   return queryPool(connectionId, query, params)
 }
 
+export function isConnectionReadOnly(connectionId: number): boolean {
+  const connection = getSavedConnection(connectionId)
+  return Boolean(connection?.readOnly)
+}
+
 const buildSchemaTree = (
   databases: Record<string, unknown>[],
   tables: Record<string, unknown>[],
@@ -401,7 +409,7 @@ const buildSchemaTree = (
 export function registerDatabaseIpc(): void {
   ipcMain.handle('db:listConnections', () => {
     const savedConnections = getDb().prepare(`
-      SELECT id, type AS driver, name, host, port, user, database, last_used_at AS lastUsedAt
+      SELECT id, type AS driver, name, host, port, user, database, read_only AS readOnly, last_used_at AS lastUsedAt
       FROM db_connections
       ORDER BY COALESCE(last_used_at, '') DESC, name
     `).all() as Array<Record<string, unknown> & { id: number }>
@@ -410,6 +418,7 @@ export function registerDatabaseIpc(): void {
       const state = connectionStates.get(connection.id)
       return {
         ...connection,
+        readOnly: Boolean(connection.readOnly),
         status: state?.status ?? (pools.has(connection.id) ? 'connected' : 'disconnected'),
         statusError: state?.error,
       }
@@ -419,8 +428,8 @@ export function registerDatabaseIpc(): void {
   ipcMain.handle('db:saveConnection', (_event, input: DbConnectionInput) => {
     const connection = normalizeConnection(input)
     const result = getDb().prepare(`
-      INSERT INTO db_connections (name, type, host, port, database, user, encrypted_password)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO db_connections (name, type, host, port, database, user, encrypted_password, read_only)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       connection.name,
       connection.driver,
@@ -429,6 +438,7 @@ export function registerDatabaseIpc(): void {
       connection.database,
       connection.user,
       encryptPassword(connection.password),
+      connection.readOnly ? 1 : 0,
     )
 
     const connectionId = Number(result.lastInsertRowid)
@@ -448,7 +458,7 @@ export function registerDatabaseIpc(): void {
 
     getDb().prepare(`
       UPDATE db_connections
-      SET name = ?, type = ?, host = ?, port = ?, database = ?, user = ?, encrypted_password = ?
+      SET name = ?, type = ?, host = ?, port = ?, database = ?, user = ?, encrypted_password = ?, read_only = ?
       WHERE id = ?
     `).run(
       connection.name,
@@ -458,6 +468,7 @@ export function registerDatabaseIpc(): void {
       connection.database,
       connection.user,
       encryptedPassword,
+      connection.readOnly ? 1 : 0,
       connectionId,
     )
 

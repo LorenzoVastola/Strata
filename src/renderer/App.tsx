@@ -19,6 +19,8 @@ export default function App() {
   const [aiWidth, setAiWidth] = useState(320);
   const [dbConnectionToOpen, setDbConnectionToOpen] = useState<number | null>(null);
   const [newDbConnectionRequestId, setNewDbConnectionRequestId] = useState(0);
+  const [dbConfirmation, setDbConfirmation] = useState<DbMutatingQueryConfirmationPayload | null>(null);
+  const [gitConfirmation, setGitConfirmation] = useState<GitDestructiveConfirmationPayload | null>(null);
   const hasWorkspace = Boolean(workspacePath);
 
   const idePanelRef = useRef<IDEPanelHandle>(null);
@@ -28,6 +30,7 @@ export default function App() {
   }, []);
 
   const handleOpenWorkspace = (path: string) => {
+    void window.api.environment.setWorkspaceRoot(path);
     setWorkspacePath(path);
     setActivePanel("ide");
   };
@@ -64,6 +67,36 @@ export default function App() {
       setActivePanel("ide");
     });
   }, []);
+
+  useEffect(() => {
+    return window.api.database.onConfirmMutatingQuery((payload) => {
+      setDbConfirmation(payload);
+    });
+  }, []);
+
+  useEffect(() => {
+    return window.api.git.onConfirmDestructive((payload) => {
+      setGitConfirmation(payload);
+    });
+  }, []);
+
+  const respondDbConfirmation = (approved: boolean) => {
+    if (!dbConfirmation) return;
+    window.api.database.respondMutatingQueryConfirmation({
+      requestId: dbConfirmation.requestId,
+      approved,
+    });
+    setDbConfirmation(null);
+  };
+
+  const respondGitConfirmation = (approved: boolean) => {
+    if (!gitConfirmation) return;
+    window.api.git.respondDestructiveConfirmation({
+      requestId: gitConfirmation.requestId,
+      approved,
+    });
+    setGitConfirmation(null);
+  };
 
   const buildAiContext = useCallback(async () => {
     const editorContext = idePanelRef.current?.getContext() ?? { activeFile: null, openFiles: [] };
@@ -260,6 +293,65 @@ export default function App() {
       </div>
 
       <StatusBar workspacePath={workspacePath} />
+      {dbConfirmation && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-2xl rounded-md border border-zinc-700 bg-zinc-900 shadow-2xl">
+            <div className="border-b border-zinc-800 px-4 py-3 text-sm font-medium text-zinc-100">
+              Conferma query mutante
+            </div>
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap p-4 text-xs text-zinc-200">
+              {dbConfirmation.sql}
+            </pre>
+            <div className="flex justify-end gap-2 border-t border-zinc-800 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => respondDbConfirmation(false)}
+                className="rounded bg-zinc-700 px-3 py-1.5 text-xs text-zinc-100 hover:bg-zinc-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => respondDbConfirmation(true)}
+                className="rounded bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {gitConfirmation && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-xl rounded-md border border-zinc-700 bg-zinc-900 shadow-2xl">
+            <div className="border-b border-zinc-800 px-4 py-3 text-sm font-medium text-zinc-100">
+              Conferma operazione Git
+            </div>
+            <div className="space-y-2 p-4 text-sm text-zinc-200">
+              <p>{gitConfirmation.description}</p>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-3 text-xs">
+                {gitConfirmation.target}
+              </pre>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-zinc-800 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => respondGitConfirmation(false)}
+                className="rounded bg-zinc-700 px-3 py-1.5 text-xs text-zinc-100 hover:bg-zinc-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => respondGitConfirmation(true)}
+                className="rounded bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

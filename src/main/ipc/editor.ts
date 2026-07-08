@@ -1,16 +1,20 @@
 import { ipcMain } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
+import { getActiveWorkspaceRoot } from '../environment'
+import { assertWithinWorkspace } from '../utils/pathGuard'
 
 export function registerEditorIpc(): void {
 
   ipcMain.handle('editor:readFile', async (_event, filePath: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), filePath)
     const content = await fs.readFile(filePath, 'utf-8')
     const ext = path.extname(filePath).slice(1)
     return { content, language: extToLanguage(ext) }
   })
 
   ipcMain.handle('editor:writeFile', async (_event, filePath: string, content: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), filePath)
     await fs.writeFile(filePath, content, 'utf-8')
     return true
   })

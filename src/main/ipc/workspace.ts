@@ -1,7 +1,9 @@
 import { ipcMain, dialog, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import { getActiveWorkspaceRoot, setActiveWorkspaceRoot } from '../environment'
 import { getDb } from '../storage/db'
+import { assertWithinWorkspace } from '../utils/pathGuard'
 
 type SearchResult = {
   filePath: string
@@ -70,6 +72,7 @@ export function registerWorkspaceIpc(): void {
     const folderPath = result.filePaths[0]
     const name = path.basename(folderPath)
     const db = getDb()
+    setActiveWorkspaceRoot(folderPath)
 
     db.prepare(`
       INSERT INTO workspaces (path, name, last_opened)
@@ -88,6 +91,7 @@ export function registerWorkspaceIpc(): void {
   })
 
   ipcMain.handle('workspace:readDir', (_event, dirPath: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), dirPath)
     const entries = fs.readdirSync(dirPath, { withFileTypes: true })
     return entries.map(e => ({
       name: e.name,
@@ -97,29 +101,37 @@ export function registerWorkspaceIpc(): void {
   })
 
   ipcMain.handle('workspace:createFolder', async (_event, folderPath: string, name: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), folderPath)
     const fullPath = path.join(folderPath, name)
+    assertWithinWorkspace(getActiveWorkspaceRoot(), fullPath)
     await fs.promises.mkdir(fullPath, { recursive: true })
     return { path: fullPath, name }
   })
 
   ipcMain.handle('workspace:createFile', async (_event, folderPath: string, name: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), folderPath)
     const fullPath = path.join(folderPath, name)
+    assertWithinWorkspace(getActiveWorkspaceRoot(), fullPath)
     await fs.promises.writeFile(fullPath, '', { flag: 'wx' })
     return { path: fullPath, name }
   })
 
   ipcMain.handle('workspace:renamePath', async (_event, targetPath: string, name: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), targetPath)
     const nextPath = path.join(path.dirname(targetPath), name)
+    assertWithinWorkspace(getActiveWorkspaceRoot(), nextPath)
     await fs.promises.rename(targetPath, nextPath)
     return { path: nextPath, name, isDirectory: fs.statSync(nextPath).isDirectory() }
   })
 
   ipcMain.handle('workspace:deletePath', async (_event, targetPath: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), targetPath)
     await fs.promises.rm(targetPath, { recursive: true, force: true })
     return true
   })
 
   ipcMain.handle('workspace:revealPath', async (_event, targetPath: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), targetPath)
     const stat = await fs.promises.stat(targetPath)
     const folderPath = stat.isDirectory() ? targetPath : path.dirname(targetPath)
     await shell.openPath(folderPath)
@@ -127,6 +139,7 @@ export function registerWorkspaceIpc(): void {
   })
 
   ipcMain.handle('workspace:searchInFiles', async (_event, workspacePath: string, query: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), workspacePath)
     const trimmedQuery = query.trim()
     if (!trimmedQuery) return []
 
@@ -174,6 +187,7 @@ export function registerWorkspaceIpc(): void {
   })
 
   ipcMain.handle('workspace:getFiles', async (_event, workspacePath: string) => {
+    assertWithinWorkspace(getActiveWorkspaceRoot(), workspacePath)
     return walkFiles(workspacePath)
   })
 
