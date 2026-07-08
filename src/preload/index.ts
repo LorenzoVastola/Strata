@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('api', {
   environment: {
     setDb: (connectionId: string | number | null) => ipcRenderer.invoke('env:setDb', connectionId),
     setHttpCollection: (collectionId: string | number | null) => ipcRenderer.invoke('env:setHttpCollection', collectionId),
+    setWorkspaceRoot: (workspaceRoot: string | null) => ipcRenderer.invoke('env:setWorkspaceRoot', workspaceRoot),
   },
 
   // Terminal
@@ -66,6 +67,13 @@ contextBridge.exposeInMainWorld('api', {
     getSchema: (connectionId: number) => ipcRenderer.invoke('db:getSchema', connectionId),
     query: (connectionId: number, query: string, params: unknown[] = []) =>
       ipcRenderer.invoke('db:query', connectionId, query, params),
+    onConfirmMutatingQuery: (callback: (payload: DbMutatingQueryConfirmationPayload) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: DbMutatingQueryConfirmationPayload) => callback(payload)
+      ipcRenderer.on('db:confirm-mutating-query', listener)
+      return () => ipcRenderer.removeListener('db:confirm-mutating-query', listener)
+    },
+    respondMutatingQueryConfirmation: (payload: DbMutatingQueryConfirmationResponse) =>
+      ipcRenderer.send('db:confirm-mutating-query:response', payload),
     browseTable: (
       connectionId: number,
       databaseName: string,
@@ -95,6 +103,8 @@ contextBridge.exposeInMainWorld('api', {
     setActiveRequest: (id: number | null) => ipcRenderer.invoke('http:setActiveRequest', id),
     getLayout: () => ipcRenderer.invoke('http:getLayout'),
     saveLayout: (layout: { sidebarWidth: number; requestPanePercent: number }) => ipcRenderer.invoke('http:saveLayout', layout),
+    getHistorySettings: () => ipcRenderer.invoke('http:getHistorySettings'),
+    saveHistorySettings: (settings: { redactBodies: boolean }) => ipcRenderer.invoke('http:saveHistorySettings', settings),
     listEnvironments: () => ipcRenderer.invoke('http:listEnvironments'),
     saveEnvironment: (environment: HttpEnvironment) => ipcRenderer.invoke('http:saveEnvironment', environment),
     deleteEnvironment: (id: number) => ipcRenderer.invoke('http:deleteEnvironment', id),
@@ -112,6 +122,13 @@ contextBridge.exposeInMainWorld('api', {
     discardFile: (workspacePath: string, filePath: string, isUntracked: boolean) =>
       ipcRenderer.invoke('git:discardFile', workspacePath, filePath, isUntracked),
     discardAll: (workspacePath: string) => ipcRenderer.invoke('git:discardAll', workspacePath),
+    onConfirmDestructive: (callback: (payload: GitDestructiveConfirmationPayload) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: GitDestructiveConfirmationPayload) => callback(payload)
+      ipcRenderer.on('git:confirm-destructive', listener)
+      return () => ipcRenderer.removeListener('git:confirm-destructive', listener)
+    },
+    respondDestructiveConfirmation: (payload: GitDestructiveConfirmationResponse) =>
+      ipcRenderer.send('git:confirm-destructive:response', payload),
     commit: (workspacePath: string, message: string) => ipcRenderer.invoke('git:commit', workspacePath, message),
     getBranch: (workspacePath: string) => ipcRenderer.invoke('git:getBranch', workspacePath),
     getBranches: (workspacePath: string) => ipcRenderer.invoke('git:getBranches', workspacePath),
@@ -202,6 +219,15 @@ declare global {
   type GitBranchItem = { name: string; current: boolean; remote: boolean }
   type GitDiff = { original: string; modified: string }
   type GitCommitFile = { status: string; path: string; oldPath?: string }
+  type GitDestructiveConfirmationPayload = {
+    requestId: string
+    description: string
+    target: string
+  }
+  type GitDestructiveConfirmationResponse = {
+    requestId: string
+    approved: boolean
+  }
 
   type DbDriver = 'mysql' | 'postgres'
   type DbConnectionInput = {
@@ -212,12 +238,21 @@ declare global {
     user: string
     password: string
     database: string
+    readOnly: boolean
   }
   type DbConnection = Omit<DbConnectionInput, 'password'> & {
     id: number
     status?: 'connected' | 'disconnected' | 'error'
     statusError?: string
     lastUsedAt?: string
+  }
+  type DbMutatingQueryConfirmationPayload = {
+    requestId: string
+    sql: string
+  }
+  type DbMutatingQueryConfirmationResponse = {
+    requestId: string
+    approved: boolean
   }
   type DbColumn = {
     name: string
@@ -292,6 +327,7 @@ declare global {
     description?: string
     scripts?: HttpScripts
     responseCaptures?: HttpResponseCapture[]
+    sanitizeHistory?: boolean
   }
   type HttpEnvironment = { id?: number; name: string; variables: HttpKeyValue[]; updatedAt?: string }
   type HttpResponse = {
@@ -337,6 +373,7 @@ declare global {
     system: string
     messages: { role: AiMessageRole; content: string }[]
     agentMode: AiAgent
+    explicitContext?: { path: string; relativePath: string; kind: 'file' | 'folder' }[]
   }
   type AiStartSessionPayload = {
     sessionId: string
@@ -405,6 +442,7 @@ declare global {
       environment: {
         setDb: (connectionId: string | number | null) => Promise<AIEnvironment>
         setHttpCollection: (collectionId: string | number | null) => Promise<AIEnvironment>
+        setWorkspaceRoot: (workspaceRoot: string | null) => Promise<string | null>
       }
       terminal: {
         getShells: () => Promise<{ id: string; label: string }[]>
@@ -424,6 +462,8 @@ declare global {
         connect: (connectionId: number) => Promise<boolean>
         getSchema: (connectionId: number) => Promise<DbSchemaNode[]>
         query: (connectionId: number, query: string, params?: unknown[]) => Promise<DbQueryResult>
+        onConfirmMutatingQuery: (callback: (payload: DbMutatingQueryConfirmationPayload) => void) => () => void
+        respondMutatingQueryConfirmation: (payload: DbMutatingQueryConfirmationResponse) => void
         browseTable: (
           connectionId: number,
           databaseName: string,
@@ -441,6 +481,8 @@ declare global {
         stageAll: (workspacePath: string) => Promise<boolean>
         discardFile: (workspacePath: string, filePath: string, isUntracked: boolean) => Promise<boolean>
         discardAll: (workspacePath: string) => Promise<boolean>
+        onConfirmDestructive: (callback: (payload: GitDestructiveConfirmationPayload) => void) => () => void
+        respondDestructiveConfirmation: (payload: GitDestructiveConfirmationResponse) => void
         commit: (workspacePath: string, message: string) => Promise<boolean>
         getBranch: (workspacePath: string) => Promise<string>
         getBranches: (workspacePath: string) => Promise<GitBranchItem[]>
@@ -470,6 +512,8 @@ declare global {
         setActiveRequest: (id: number | null) => Promise<boolean>
         getLayout: () => Promise<{ sidebarWidth: number; requestPanePercent: number }>
         saveLayout: (layout: { sidebarWidth: number; requestPanePercent: number }) => Promise<boolean>
+        getHistorySettings: () => Promise<{ redactBodies: boolean }>
+        saveHistorySettings: (settings: { redactBodies: boolean }) => Promise<boolean>
         listEnvironments: () => Promise<HttpEnvironment[]>
         saveEnvironment: (environment: HttpEnvironment) => Promise<number>
         deleteEnvironment: (id: number) => Promise<boolean>

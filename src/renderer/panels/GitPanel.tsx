@@ -112,11 +112,15 @@ export default function GitPanel({ workspacePath, onOpenDiff }: Props) {
     try {
       const branchList = await window.api.git.getBranches(workspacePath)
       setBranches(branchList)
-    } catch {}
+    } catch {
+      // Ignore branch refresh failures; status errors are already surfaced above.
+    }
     try {
       const commits = await window.api.git.getLog(workspacePath)
       setLog(commits)
-    } catch {}
+    } catch {
+      // Ignore history refresh failures; the panel can still show current status.
+    }
   }, [workspacePath])
 
   useEffect(() => {

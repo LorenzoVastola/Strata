@@ -1,9 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
+import { ipcMain } from 'electron'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { z } from 'zod'
 import { getAIEnvironment, getMainWebContents } from '../environment'
-import { executeDatabaseQuery, getDatabaseSchema } from '../ipc/database'
+import { executeDatabaseQuery, getDatabaseSchema, isConnectionReadOnly } from '../ipc/database'
 import { getHttpRequest, saveHttpRequest, sendHttpRequest } from '../ipc/http'
 
 type HeaderInput = Record<string, string> | { key: string; value: string; enabled?: boolean }[] | undefined
@@ -19,8 +20,38 @@ const textResult = (value: unknown) => ({
   content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }]
 })
 
-const logTool = (tool: string, params: unknown) => {
-  console.log(`[MCP] tool=${tool} params=${JSON.stringify(params)}`)
+const logTool = (tool: string) => {
+  console.log(`[MCP] tool=${tool} called`)
+}
+
+const mutatingSqlKeywords = new Set(['INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'CREATE', 'REPLACE'])
+
+const isMutatingSql = (sql: string) => {
+  const match = sql.trim().match(/^([a-z]+)/i)
+  return match ? mutatingSqlKeywords.has(match[1].toUpperCase()) : false
+}
+
+const requestMutatingQueryConfirmation = (sql: string): Promise<boolean> => {
+  const webContents = getMainWebContents()
+  if (!webContents) return Promise.resolve(false)
+
+  const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      ipcMain.removeListener('db:confirm-mutating-query:response', onResponse)
+      resolve(false)
+    }, 60_000)
+
+    const onResponse = (_event: Electron.IpcMainEvent, payload: { requestId: string; approved: boolean }) => {
+      if (payload.requestId !== requestId) return
+      clearTimeout(timeout)
+      ipcMain.removeListener('db:confirm-mutating-query:response', onResponse)
+      resolve(Boolean(payload.approved))
+    }
+
+    ipcMain.on('db:confirm-mutating-query:response', onResponse)
+    webContents.send('db:confirm-mutating-query', { requestId, sql })
+  })
 }
 
 const activeDbConnectionId = () => {
@@ -78,7 +109,7 @@ function createMcpServer(): McpServer {
     description: 'Ritorna lo schema del database attualmente connesso in Strata: tabelle, colonne, chiavi primarie e foreign key. Usalo prima di scrivere query o codice che tocca il DB.',
     inputSchema: {}
   }, async () => {
-    logTool('strata_db_schema', {})
+    logTool('strata_db_schema')
     const connectionId = activeDbConnectionId()
     if (!connectionId) return textResult('Nessun database settato nell\'environment.')
     return textResult(await getDatabaseSchema(connectionId))
@@ -90,9 +121,14 @@ function createMcpServer(): McpServer {
       sql: z.string().describe('Query SQL da eseguire sul database flaggato')
     }
   }, async ({ sql }) => {
-    logTool('strata_db_query', { sql })
+    logTool('strata_db_query')
     const connectionId = activeDbConnectionId()
     if (!connectionId) return textResult('Nessun database settato nell\'environment.')
+    if (isMutatingSql(sql)) {
+      if (isConnectionReadOnly(connectionId)) return textResult({ error: 'Connection is in read-only mode' })
+      const approved = await requestMutatingQueryConfirmation(sql)
+      if (!approved) return textResult({ error: 'Query cancelled by user' })
+    }
     const result = await executeDatabaseQuery(connectionId, sql)
     return textResult({ ...result, rows: result.rows.slice(0, 100), rowCount: Math.min(result.rowCount, 100) })
   })
@@ -107,7 +143,7 @@ function createMcpServer(): McpServer {
       body: z.string().optional()
     }
   }, async ({ method, url, name, headers, body }) => {
-    logTool('strata_http_save_request', { method, url, name, headers, body })
+    logTool('strata_http_save_request')
     const collectionId = activeHttpCollectionId()
     if (!collectionId) return textResult('Nessuna collection HTTP settata nell\'environment.')
     const id = saveHttpRequest(makeRequest({ collectionId, method, url, name, headers: headers as HeaderInput, body }))
@@ -124,7 +160,7 @@ function createMcpServer(): McpServer {
       body: z.string().optional()
     }
   }, async ({ requestId, method, url, headers, body }) => {
-    logTool('strata_http_send', { requestId, method, url, headers, body })
+    logTool('strata_http_send')
     const collectionId = activeHttpCollectionId()
     if (!collectionId) return textResult('Nessuna collection HTTP settata nell\'environment.')
     const request = requestId
@@ -141,7 +177,7 @@ function createMcpServer(): McpServer {
       code: z.string().describe('Codice da inserire nella posizione corrente del cursore editor')
     }
   }, async ({ code }) => {
-    logTool('strata_editor_insert', { code })
+    logTool('strata_editor_insert')
     const webContents = getMainWebContents()
     if (!webContents) return textResult('Editor non disponibile: finestra Strata non pronta.')
     webContents.send('editor:insertCode', { code })

@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 10
+export const SCHEMA_VERSION = 11
 
 export const migrations: Record<number, string> = {
   1: `
@@ -133,5 +133,9 @@ export const migrations: Record<number, string> = {
     ALTER TABLE db_connections ADD COLUMN last_used_at TEXT;
     UPDATE db_connections SET last_used_at = COALESCE(last_used_at, datetime('now'));
     UPDATE schema_meta SET version = 10;
+  `,
+  11: `
+    ALTER TABLE db_connections ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
+    UPDATE schema_meta SET version = 11;
   `
 }

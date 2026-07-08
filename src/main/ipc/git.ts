@@ -2,9 +2,44 @@ import { ipcMain } from 'electron'
 import simpleGit from 'simple-git'
 import fs from 'fs'
 import path from 'path'
+import { getActiveWorkspaceRoot } from '../environment'
+import { getMainWebContents } from '../environment'
+import { assertWithinWorkspace } from '../utils/pathGuard'
+
+const assertGitWorkspace = (workspacePath: string) => {
+  assertWithinWorkspace(getActiveWorkspaceRoot(), workspacePath)
+}
+
+const assertGitFile = (workspacePath: string, filePath: string) => {
+  assertWithinWorkspace(workspacePath, path.join(workspacePath, filePath))
+}
+
+const requestDestructiveConfirmation = (description: string, target: string): Promise<boolean> => {
+  const webContents = getMainWebContents()
+  if (!webContents) return Promise.resolve(false)
+
+  const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      ipcMain.removeListener('git:confirm-destructive:response', onResponse)
+      resolve(false)
+    }, 60_000)
+
+    const onResponse = (_event: Electron.IpcMainEvent, payload: { requestId: string; approved: boolean }) => {
+      if (payload.requestId !== requestId) return
+      clearTimeout(timeout)
+      ipcMain.removeListener('git:confirm-destructive:response', onResponse)
+      resolve(Boolean(payload.approved))
+    }
+
+    ipcMain.on('git:confirm-destructive:response', onResponse)
+    webContents.send('git:confirm-destructive', { requestId, description, target })
+  })
+}
 
 export function registerGitIpc() {
   ipcMain.handle('git:status', async (_, workspacePath: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     const status = await git.status()
 
@@ -40,24 +75,36 @@ export function registerGitIpc() {
   })
 
   ipcMain.handle('git:stage', async (_, workspacePath: string, filePath: string) => {
+    assertGitWorkspace(workspacePath)
+    assertGitFile(workspacePath, filePath)
     const git = simpleGit(workspacePath)
     await git.add(filePath)
     return true
   })
 
   ipcMain.handle('git:unstage', async (_, workspacePath: string, filePath: string) => {
+    assertGitWorkspace(workspacePath)
+    assertGitFile(workspacePath, filePath)
     const git = simpleGit(workspacePath)
     await git.raw(['restore', '--staged', filePath])
     return true
   })
 
   ipcMain.handle('git:stageAll', async (_, workspacePath: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     await git.add('.')
     return true
   })
 
   ipcMain.handle('git:discardFile', async (_, workspacePath: string, filePath: string, isUntracked: boolean) => {
+    assertGitWorkspace(workspacePath)
+    assertGitFile(workspacePath, filePath)
+    const approved = await requestDestructiveConfirmation(
+      isUntracked ? 'Delete untracked file' : 'Discard file changes',
+      filePath,
+    )
+    if (!approved) return false
     const git = simpleGit(workspacePath)
     if (isUntracked) {
       const fullPath = path.join(workspacePath, filePath)
@@ -69,24 +116,30 @@ export function registerGitIpc() {
   })
 
   ipcMain.handle('git:discardAll', async (_, workspacePath: string) => {
+    assertGitWorkspace(workspacePath)
+    const approved = await requestDestructiveConfirmation('Discard all working tree changes', workspacePath)
+    if (!approved) return false
     const git = simpleGit(workspacePath)
     await git.raw(['checkout', '--', '.'])
     return true
   })
 
   ipcMain.handle('git:commit', async (_, workspacePath: string, message: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     await git.commit(message)
     return true
   })
 
   ipcMain.handle('git:getBranch', async (_, workspacePath: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     const status = await git.status()
     return status.current ?? ''
   })
 
   ipcMain.handle('git:getBranches', async (_, workspacePath: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     const branches = await git.branch(['-a'])
     const result: { name: string; current: boolean; remote: boolean }[] = []
@@ -106,30 +159,35 @@ export function registerGitIpc() {
   })
 
   ipcMain.handle('git:checkoutBranch', async (_, workspacePath: string, branch: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     await git.checkout(branch)
     return true
   })
 
   ipcMain.handle('git:createBranch', async (_, workspacePath: string, branch: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     await git.checkoutLocalBranch(branch)
     return true
   })
 
   ipcMain.handle('git:pull', async (_, workspacePath: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     await git.pull()
     return true
   })
 
   ipcMain.handle('git:push', async (_, workspacePath: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     await git.push()
     return true
   })
 
   ipcMain.handle('git:getLog', async (_, workspacePath: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     const log = await git.log({ maxCount: 50 })
     return log.all.map(commit => ({
@@ -143,6 +201,7 @@ export function registerGitIpc() {
   })
 
   ipcMain.handle('git:getCommitFiles', async (_, workspacePath: string, hash: string) => {
+    assertGitWorkspace(workspacePath)
     const git = simpleGit(workspacePath)
     const output = await git.raw(['show', '--name-status', '--format=', hash])
     const lines = output.trim().split('\n').filter(Boolean)
@@ -156,6 +215,8 @@ export function registerGitIpc() {
   })
 
   ipcMain.handle('git:getCommitFileDiff', async (_, workspacePath: string, hash: string, filePath: string) => {
+    assertGitWorkspace(workspacePath)
+    assertGitFile(workspacePath, filePath)
     const git = simpleGit(workspacePath)
     let original = ''
     let modified = ''
@@ -165,6 +226,8 @@ export function registerGitIpc() {
   })
 
   ipcMain.handle('git:getDiff', async (_, workspacePath: string, filePath: string, isStaged: boolean) => {
+    assertGitWorkspace(workspacePath)
+    assertGitFile(workspacePath, filePath)
     const git = simpleGit(workspacePath)
 
     let original = ''

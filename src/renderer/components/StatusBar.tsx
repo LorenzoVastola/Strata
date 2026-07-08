@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Cloud, GitBranch, Plus, RefreshCw } from 'lucide-react'
 import { DARK_THEMES, LIGHT_THEMES, applyThemeCSSVars, getTheme } from '../themes'
 
@@ -23,7 +23,7 @@ export default function StatusBar({ workspacePath, onBranchChange }: Props) {
   const themeDropdownRef = useRef<HTMLDivElement>(null)
   const newBranchRef = useRef<HTMLInputElement>(null)
 
-  const fetchBranch = async () => {
+  const fetchBranch = useCallback(async () => {
     if (!workspacePath) { setBranch(''); setAhead(0); setBehind(0); return }
     try {
       const status = await window.api.git.status(workspacePath)
@@ -33,9 +33,9 @@ export default function StatusBar({ workspacePath, onBranchChange }: Props) {
     } catch {
       setBranch('')
     }
-  }
+  }, [workspacePath])
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       const s = await window.api.getEditorSettings()
       const t = s.theme || 'one-dark-pro'
@@ -43,18 +43,18 @@ export default function StatusBar({ workspacePath, onBranchChange }: Props) {
       applyThemeCSSVars(t)
       setAutoSave(s.autoSave ?? true)
     } catch { /* ignore */ }
-  }
+  }, [])
 
   useEffect(() => {
     fetchBranch()
     fetchSettings()
-  }, [workspacePath])
+  }, [fetchBranch, fetchSettings])
 
   // Poll every 30s
   useEffect(() => {
     const id = setInterval(fetchBranch, 30_000)
     return () => clearInterval(id)
-  }, [workspacePath])
+  }, [fetchBranch])
 
   // Listen for theme changes from IDEPanel's own bottom-bar select
   useEffect(() => {

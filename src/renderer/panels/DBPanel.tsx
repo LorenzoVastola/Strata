@@ -65,6 +65,7 @@ const defaultForm: DbConnectionInput = {
   user: '',
   password: '',
   database: '',
+  readOnly: false,
 }
 
 const formatDuration = (duration: number) => `${Math.round(duration)}ms`
@@ -411,6 +412,7 @@ export default function DBPanel({ initialConnectionId = null, newConnectionReque
         port: form.port,
         user: form.user,
         database: form.database,
+        readOnly: form.readOnly,
         hasPassword: Boolean(form.password),
       },
     })
@@ -436,6 +438,7 @@ export default function DBPanel({ initialConnectionId = null, newConnectionReque
         port: form.port,
         user: form.user,
         database: form.database,
+        readOnly: form.readOnly,
         hasPassword: Boolean(form.password),
       },
     })
@@ -663,6 +666,7 @@ export default function DBPanel({ initialConnectionId = null, newConnectionReque
       user: connection.user,
       password: '',
       database: connection.database,
+      readOnly: connection.readOnly,
     })
     setTestState('success')
     setDialogOpen(true)
@@ -1230,6 +1234,14 @@ export default function DBPanel({ initialConnectionId = null, newConnectionReque
               <label className="col-span-2 flex flex-col gap-1">
                 Database
                 <input value={form.database} onChange={(event) => updateForm('database', event.target.value)} className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 outline-none" />
+              </label>
+              <label className="col-span-2 flex items-center gap-2 rounded border border-zinc-800 bg-zinc-950/60 px-2 py-2 text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={form.readOnly}
+                  onChange={(event) => updateForm('readOnly', event.target.checked)}
+                />
+                Read-only: blocca query mutanti via AI/MCP
               </label>
             </div>
             <div className="flex items-center gap-2 border-t border-zinc-800 px-4 py-3">

@@ -1,4 +1,4 @@
-// @ts-ignore-next-line
+// @ts-expect-error better-sqlite3 is resolved at runtime by Electron.
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import path from 'path'

@@ -36,6 +36,7 @@ const defaultRequest = (collectionId: number): HttpRequest => ({
   auth: { type: 'none' },
   scripts: { preRequest: '', postResponse: '' },
   responseCaptures: [],
+  sanitizeHistory: false,
   timeoutMs: 30000,
   environmentId: null,
 })
@@ -129,6 +130,7 @@ const historyToRequest = (item: HistoryItem, fallbackCollectionId: number): Http
   auth: (item.request.auth as HttpAuth) ?? { type: 'none' },
   scripts: (item.request.scripts as HttpScripts) ?? { preRequest: '', postResponse: '' },
   responseCaptures: Array.isArray(item.request.responseCaptures) ? item.request.responseCaptures as HttpResponseCapture[] : [],
+  sanitizeHistory: Boolean(item.request.sanitizeHistory),
   timeoutMs: Number(item.request.timeoutMs ?? 30000),
   environmentId: item.request.environmentId === undefined ? null : Number(item.request.environmentId),
 })
@@ -474,6 +476,7 @@ export default function HttpPanel() {
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [requestPanePercent, setRequestPanePercent] = useState(50)
   const [theme, setTheme] = useState('one-dark-pro')
+  const [redactHistoryBodies, setRedactHistoryBodies] = useState(false)
 
   const activeEnvironment = environments.find((environment) => environment.id === draft?.environmentId) ?? null
   const globalsEnvironment = environments.find((environment) => environment.name.toLowerCase() === 'globals') ?? null
@@ -502,9 +505,13 @@ export default function HttpPanel() {
   }
 
   const loadLayout = async () => {
-    const layout = await window.api.http.getLayout()
+    const [layout, historySettings] = await Promise.all([
+      window.api.http.getLayout(),
+      window.api.http.getHistorySettings(),
+    ])
     setSidebarWidth(layout.sidebarWidth)
     setRequestPanePercent(layout.requestPanePercent)
+    setRedactHistoryBodies(historySettings.redactBodies)
   }
 
   useEffect(() => {
@@ -912,6 +919,11 @@ export default function HttpPanel() {
     if (!editingEnvironment.id) updateDraft({ environmentId: id })
   }
 
+  const updateGlobalHistoryRedaction = async (redactBodies: boolean) => {
+    setRedactHistoryBodies(redactBodies)
+    await window.api.http.saveHistorySettings({ redactBodies })
+  }
+
   const saveResponseCapture = () => {
     if (!draft || !captureDraft.jsonPath.trim() || !captureDraft.variable.trim()) return
     updateDraft({
@@ -1256,6 +1268,23 @@ export default function HttpPanel() {
             <label className="flex items-center gap-2 text-zinc-500">
               Timeout
               <input type="number" value={draft?.timeoutMs ?? 30000} onChange={(event) => updateDraft({ timeoutMs: Number(event.target.value) })} className="w-24 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 outline-none" />
+            </label>
+            <label className="flex items-center gap-1.5 text-zinc-500" title="Redact bodies and sensitive headers for this request history">
+              <input
+                type="checkbox"
+                checked={Boolean(draft?.sanitizeHistory)}
+                disabled={!draft}
+                onChange={(event) => updateDraft({ sanitizeHistory: event.target.checked })}
+              />
+              Sanitize history
+            </label>
+            <label className="flex items-center gap-1.5 text-zinc-500" title="Always redact HTTP history bodies and sensitive headers">
+              <input
+                type="checkbox"
+                checked={redactHistoryBodies}
+                onChange={(event) => void updateGlobalHistoryRedaction(event.target.checked)}
+              />
+              Global redact
             </label>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
