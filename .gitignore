@@ -14,8 +14,33 @@ app-update.yml
 
 # Environment variables
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
+
+# Local credentials and data
+.npmrc
+.netrc
+.pypirc
+.envrc
+credentials.json
+service-account*.json
+id_rsa*
+id_ed25519*
+*.pem
+*.key
+*.p8
+*.ppk
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.kdbx
+*.sqlite
+*.sqlite3
+*.db
+*.db-*
+*.dump
 
 # Logs
 logs/
